@@ -29,6 +29,10 @@ sys.path.insert(0, str(BITRIX_DIR))
 # страница «WEEK GOALS» (текущие цели на 1–2 недели)
 WEEK_GOALS_PAGE = "b3a8585e-a32f-8272-b2d2-0142e1303050"
 
+# файл хода интервью (режим 🎯 один пользователь — храним диалог целиком)
+CONV_FILE = HERE / ".bot_priorities_conv.json"
+CONV_TTL_SEC = 3 * 3600  # старше 3 ч — начинаем заново
+
 # Ответственный (Notion) → Bitrix user ID. Михаил=сам, остальные — руководители.
 MANAGERS = {
     "Михаил (сам)": 1,
@@ -60,21 +64,36 @@ SYSTEM = f"""\
 
 АЛГОРИТМ:
 1. Пойми ТИП ввода: Задача / Идея / Цель / Мысль/тревога / Вопрос.
-2. Прочитай текущие цели недели: вызови read_week_goals.
-3. Посмотри текущую загрузку и проверь дубли: вызови get_inbox (открытые записи).
-   Если уже есть похожая запись — отметь это в duplicate_of и не плоди дубль.
-4. Привяжи к одной из целей O1–O5 (или «Без цели», если не относится).
-5. Оцени приоритет: High только если двигает ключевую цель/есть срок; иначе Medium/Low.
-6. Реши, делать самому или ДЕЛЕГИРОВАТЬ. Если задача операционная или вне зоны \
-   руководителя — предложи ответственного из списка и поставь delegate_to_bitrix=true.
-   Доступные руководители: {", ".join(k for k in MANAGERS if k != "Михаил (сам)")}.
-7. Учитывай загрузку: если на эту неделю уже много High-задач у Михаила — предложи \
-   следующую неделю или делегирование, и скажи об этом в reasoning.
-8. Вызови propose_entry с финальным черновиком. reasoning — кратко по-русски: почему \
-   такой приоритет, такая цель, такой исполнитель, есть ли перегруз/дубль.
 
-Будь конкретным и кратким. Не выдумывай дедлайны — ставь только если они следуют из \
-текста. Тревоги без действия — это Тип «Мысль/тревога», часто «Без цели», Low."""
+2. ⭐ ЕСЛИ ЭТО ЗАДАЧА — НЕ предлагай черновик сразу. Сначала проведи короткое интервью: \
+   задай уточняющие вопросы (по одному-двум за сообщение, всего 3–5), пока не узнаешь ЧЁТКО \
+   все четыре пункта:
+     • ОТВЕТСТВЕННЫЙ — кто делает (из списка: {", ".join(MANAGERS.keys())}).
+     • СРОК / ДЕДЛАЙН — к какой дате нужен результат.
+     • ОЖИДАЕМЫЙ РЕЗУЛЬТАТ — что конкретно должно появиться на выходе (артефакт/действие, \
+       а не «поработать над…»).
+     • КРИТЕРИЙ УСПЕХА — как проверим, что сделано хорошо (измеримо/наблюдаемо).
+   Спрашивай дружелюбно и по делу. Если на вопрос отвечают «не знаю / не важно» — зафиксируй \
+   это и иди дальше, не зацикливайся. Перед вопросами можешь прочитать цели (read_week_goals) \
+   и инбокс (get_inbox) для контекста и проверки дублей.
+
+3. Для Идея / Цель / Мысль-тревога / Вопрос интервью НЕ нужно (максимум один уточняющий \
+   вопрос) — сразу предлагай черновик.
+
+4. Привяжи к одной из целей O1–O5 (или «Без цели»). Оцени приоритет: High только если \
+   двигает ключевую цель или есть жёсткий срок; иначе Medium/Low. Проверь дубли через \
+   get_inbox; если есть похожее — укажи в duplicate_of и не плоди дубль.
+
+5. Когда для задачи собраны ответственный, срок, ожидаемый результат и критерий успеха — \
+   вызови propose_entry с финальным черновиком. reasoning — кратко по-русски (почему такой \
+   приоритет/цель/исполнитель, есть ли дубль).
+
+⛔ ВАЖНО: задачи НИКОГДА не ставятся в Bitrix. Единственный канал — запись в Notion-инбокс, \
+чтобы потом ассистент или руководитель её разобрал и раздал. Ответственного мы просто \
+фиксируем в записи, реальную задачу ему НЕ создаём.
+
+Отвечай по-русски, дружелюбно и кратко. Не выдумывай дедлайны и факты — бери их из ответов \
+пользователя. Тревоги без действия — Тип «Мысль/тревога», часто «Без цели», Low."""
 
 TOOLS = [
     {"name": "read_week_goals",
@@ -96,10 +115,10 @@ TOOLS = [
          "priority": {"type": "string", "enum": ["High", "Medium", "Low"]},
          "responsible": {"type": "string", "enum": list(MANAGERS.keys())},
          "week": {"type": "string", "description": "Напр. 'эта неделя', 'след. неделя', '3–4'. Можно пусто."},
-         "deadline": {"type": "string", "description": "YYYY-MM-DD, только если есть явный срок."},
-         "done_when": {"type": "string", "description": "Критерий готовности (что считается готово)."},
-         "delegate_to_bitrix": {"type": "boolean",
-                                "description": "Поставить ли реальную задачу руководителю в Bitrix24."},
+         "deadline": {"type": "string", "description": "YYYY-MM-DD. Для задачи укажи срок из ответа пользователя."},
+         "expected_result": {"type": "string",
+                             "description": "Ожидаемый конкретный результат задачи (что появится на выходе)."},
+         "done_when": {"type": "string", "description": "Критерий успеха: как проверим, что сделано хорошо."},
          "duplicate_of": {"type": "string", "description": "Название/URL похожей записи, если нашёл дубль."},
          "reasoning": {"type": "string", "description": "Краткое обоснование по-русски (1–3 предложения)."}},
          "required": ["title", "tip", "objective", "priority", "responsible", "reasoning"]}},
@@ -134,26 +153,75 @@ def _tool_get_inbox(env, open_only: bool) -> str:
         return json.dumps({"error": str(e)}, ensure_ascii=False)
 
 
+def _jsonable(messages: list) -> list:
+    """Готовим историю к записи в JSON (блоки SDK → словари)."""
+    out = []
+    for m in messages:
+        c = m["content"]
+        if isinstance(c, list):
+            c = [b if isinstance(b, dict) else b.model_dump() for b in c]
+        out.append({"role": m["role"], "content": c})
+    return out
+
+
+def _load_conv() -> list:
+    try:
+        data = json.loads(CONV_FILE.read_text())
+    except (OSError, ValueError):
+        return []
+    if dt.datetime.now().timestamp() - data.get("ts", 0) > CONV_TTL_SEC:
+        return []  # старая сессия — начинаем заново
+    return data.get("messages", [])
+
+
+def _save_conv(messages: list) -> None:
+    CONV_FILE.write_text(json.dumps(
+        {"ts": dt.datetime.now().timestamp(), "messages": _jsonable(messages)},
+        ensure_ascii=False))
+
+
+def reset_conv() -> None:
+    """Сбросить интервью (вызывать при смене режима или после записи)."""
+    try:
+        CONV_FILE.unlink()
+    except OSError:
+        pass
+
+
 def build_draft(question: str, env: dict) -> dict:
-    """Прогоняет ввод через Claude, возвращает {draft: {...}} или {error / text}."""
+    """
+    Диалоговый разбор. Для задач Claude задаёт уточняющие вопросы (3–5) — ход интервью
+    хранится между сообщениями. Возвращает:
+      {"text": "<вопрос или реплика>"}  — продолжаем диалог (бот шлёт это пользователю);
+      {"draft": {...}}                  — задача собрана, показать черновик с кнопками.
+    """
     client = anthropic.Anthropic(api_key=env["ANTHROPIC_API_KEY"])
     model = env.get("MODEL", "claude-opus-4-8")
-    messages = [{"role": "user", "content": question}]
+    messages = _load_conv()
+    messages.append({"role": "user", "content": question})
+
     for _ in range(8):
         resp = client.messages.create(
             model=model, max_tokens=2000,
             system=[{"type": "text", "text": SYSTEM, "cache_control": {"type": "ephemeral"}}],
             tools=TOOLS, messages=messages)
+
+        # Claude задал уточняющий вопрос / ответил текстом → сохраняем диалог и ждём ответа
         if resp.stop_reason != "tool_use":
             text = "".join(b.text for b in resp.content if b.type == "text").strip()
+            messages.append({"role": "assistant", "content": resp.content})
+            _save_conv(messages)
             return {"text": text or "Не понял мысль — переформулируй, пожалуйста."}
+
         messages.append({"role": "assistant", "content": resp.content})
+        draft = None
         results = []
         for b in resp.content:
             if b.type != "tool_use":
                 continue
             if b.name == "propose_entry":
-                return {"draft": dict(b.input)}
+                draft = dict(b.input)
+                continue
             if b.name == "read_week_goals":
                 out = _tool_read_goals(env)
             elif b.name == "get_inbox":
@@ -161,8 +229,14 @@ def build_draft(question: str, env: dict) -> dict:
             else:
                 out = json.dumps({"error": f"неизвестный инструмент {b.name}"}, ensure_ascii=False)
             results.append({"type": "tool_result", "tool_use_id": b.id, "content": out})
+
+        if draft is not None:          # задача собрана — интервью завершено
+            reset_conv()
+            return {"draft": draft}
         messages.append({"role": "user", "content": results})
-    return {"text": "Слишком долго думал — попробуй сформулировать короче."}
+
+    _save_conv(messages)
+    return {"text": "Слишком долго думаю — давай сформулируем короче."}
 
 
 def format_draft(d: dict) -> str:
@@ -174,10 +248,10 @@ def format_draft(d: dict) -> str:
         lines.append(f"Неделя: {d['week']}")
     if d.get("deadline"):
         lines.append(f"Дедлайн: {d['deadline']}")
+    if d.get("expected_result"):
+        lines.append(f"🎯 Результат: {d['expected_result']}")
     if d.get("done_when"):
-        lines.append(f"Готово, когда: {d['done_when']}")
-    if d.get("delegate_to_bitrix"):
-        lines.append(f"➡️ Поставлю задачу в Bitrix: <b>{d.get('responsible')}</b>")
+        lines.append(f"✅ Критерий успеха: {d['done_when']}")
     if d.get("duplicate_of"):
         lines.append(f"⚠️ Возможный дубль: {d['duplicate_of']}")
     lines.append(f"\n<i>{d.get('reasoning', '')}</i>")
