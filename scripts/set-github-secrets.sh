@@ -17,7 +17,7 @@ for KEY in FIREFLIES_API_KEY ANTHROPIC_API_KEY TELEGRAM_BOT_TOKEN TELEGRAM_CHAT_
            BITRIX_WEBHOOK_URL NOTION_API_KEY ME_EMAILS TEAM_DOMAINS TEAM_EMAILS; do
   VAL="$(get "$KEY" || true)"
   if [ -n "${VAL:-}" ]; then
-    printf '%s' "$VAL" | gh secret set "$KEY" -R "$REPO" --body-file -
+    printf '%s' "$VAL" | gh secret set "$KEY" -R "$REPO"   # значение читается со stdin
     echo "✓ $KEY"
   else
     echo "– $KEY (нет в .env — пропускаю)"
