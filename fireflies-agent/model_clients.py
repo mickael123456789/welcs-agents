@@ -9,7 +9,7 @@ ask(provider, system, user, env) -> (text, provider_used)
 Модели задаются в .env и легко меняются на актуальные:
   MODEL=claude-opus-4-8            (Claude, уже есть)
   OPENAI_MODEL=gpt-4o             (OpenAI)
-  GEMINI_MODEL=gemini-1.5-pro     (Google)
+  GEMINI_MODEL=gemini-2.5-flash     (Google)
 """
 
 from __future__ import annotations
@@ -63,7 +63,7 @@ def _openai(system: str, user: str, env: dict, max_tokens: int) -> str:
 
 
 def _gemini(system: str, user: str, env: dict, max_tokens: int) -> str:
-    model = env.get("GEMINI_MODEL", "gemini-1.5-pro")
+    model = env.get("GEMINI_MODEL", "gemini-2.5-flash")
     r = requests.post(
         GEMINI_URL.format(model=model),
         params={"key": env["GEMINI_API_KEY"]},

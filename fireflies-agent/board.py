@@ -4,8 +4,8 @@
 
 Руководитель задаёт стратегический вопрос → собирается общий бриф по бизнесу
 из ВСЕХ источников параллельно (OKR + Notion: цели недели и Инбокс + Bitrix24:
-просрочки и сделки + Fireflies: встречи за 14 дней) → 5 «директоров» (роль +
-своя модель) отвечают ПАРАЛЛЕЛЬНО → председатель (Claude) сводит в одно решение.
+просрочки и сделки + Fireflies: встречи за ~45 дней) → совет «директоров» (роль +
+своя модель) отвечает ПАРАЛЛЕЛЬНО → председатель (Claude) сводит в одно решение.
 
 Разные модели = реальное разнообразие мышления, а не один ИИ в пяти масках.
 Если ключа GPT/Gemini нет — роль автоматически играет Claude.
@@ -44,6 +44,10 @@ ADVISORS = [
     {"key": "chro", "emoji": "👥", "short": "CHRO", "title": "CHRO — директор по персоналу", "provider": "openai",
      "focus": "команда: найм, роли, мотивация, удержание, структура и делегирование. "
               "Думай про людей, нагрузку и кто что тянет."},
+    {"key": "revenue", "emoji": "📈", "short": "Revenue", "title": "Revenue-директор", "provider": "gemini",
+     "focus": "доходность объектов: ценообразование и динамика тарифов, загрузка (occupancy), ADR/RevPAR, "
+              "сезонность, длительность бронирований, маржинальность каналов (Booking/Airbnb/прямые) и "
+              "прогноз выручки. Думай про максимизацию дохода с портфеля апартаментов."},
 ]
 
 ROLE_BY_KEY = {a["key"]: a for a in ADVISORS}
@@ -89,8 +93,8 @@ def _notion_section(env: dict) -> str:
         return ""
     out = []
     goals = _tool_read_goals(env)
-    if goals and not goals.startswith("(не удалось"):
-        out.append(f"ЦЕЛИ НЕДЕЛИ (Notion):\n{goals[:1500]}")
+    if goals and not goals.startswith("("):
+        out.append(f"ЦЕЛИ (из Инбокса, Тип=Цель):\n{goals[:1500]}")
     try:
         data = json.loads(_tool_get_inbox(env, True))
         if data.get("items"):
@@ -130,21 +134,29 @@ def _bitrix_section(env: dict) -> str:
         return f"(Bitrix недоступен: {e})"
 
 
+FF_DAYS = 45        # окно истории встреч для контекста совета
+FF_MAX = 30         # сколько встреч максимум включать в бриф
+
+
 def _fireflies_section(env: dict) -> str:
-    """Сводка встреч команды за 14 дней из Fireflies."""
+    """Сводка встреч команды за FF_DAYS дней из Fireflies (резюме + ключевые слова)."""
     if not env.get("FIREFLIES_API_KEY"):
         return ""
     try:
         from fireflies_client import Fireflies
-        items = Fireflies(env["FIREFLIES_API_KEY"]).list_transcripts(_iso(14), _iso(0), limit=20)
+        items = Fireflies(env["FIREFLIES_API_KEY"]).list_transcripts(_iso(FF_DAYS), _iso(0), limit=50)
         if not items:
             return ""
         lines = []
-        for t in items[:12]:
+        for t in items[:FF_MAX]:
             s = t.get("summary") or {}
-            summ = (s.get("short_summary") or s.get("overview") or "").replace("\n", " ")[:200]
-            lines.append(f"  • {t.get('title')} ({(t.get('dateString') or '')[:10]}): {summ}")
-        return f"ВСТРЕЧИ ЗА 14 ДНЕЙ ({len(items)}):\n" + "\n".join(lines)
+            summ = (s.get("short_summary") or s.get("overview") or "").replace("\n", " ")[:280]
+            kw = s.get("keywords") or []
+            kw_str = (" [" + ", ".join(kw[:6]) + "]") if kw else ""
+            lines.append(f"  • {t.get('title')} ({(t.get('dateString') or '')[:10]}): {summ}{kw_str}")
+        shown = min(len(items), FF_MAX)
+        more = f" (показано {shown} из {len(items)})" if len(items) > FF_MAX else ""
+        return f"ВСТРЕЧИ ЗА {FF_DAYS} ДНЕЙ — {len(items)} шт{more}:\n" + "\n".join(lines)
     except Exception as e:  # noqa: BLE001
         return f"(Fireflies недоступен: {e})"
 

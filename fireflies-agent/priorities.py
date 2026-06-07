@@ -26,8 +26,6 @@ HERE = Path(__file__).parent
 BITRIX_DIR = HERE.parent / "bitrix-agent"
 sys.path.insert(0, str(BITRIX_DIR))
 
-# страница «WEEK GOALS» (текущие цели на 1–2 недели)
-WEEK_GOALS_PAGE = "b3a8585e-a32f-8272-b2d2-0142e1303050"
 
 # файл хода интервью (режим 🎯 один пользователь — храним диалог целиком)
 CONV_FILE = HERE / ".bot_priorities_conv.json"
@@ -97,7 +95,7 @@ SYSTEM = f"""\
 
 TOOLS = [
     {"name": "read_week_goals",
-     "description": "Прочитать текущие цели недели (страница WEEK GOALS в Notion).",
+     "description": "Прочитать цели из Инбокса (записи с Тип=«Цель») — текущие цели пользователя.",
      "input_schema": {"type": "object", "properties": {}}},
     {"name": "get_inbox",
      "description": "Список текущих записей в базе Инбокса (по умолчанию только не завершённые) "
@@ -131,11 +129,20 @@ def _notion(env):
 
 
 def _tool_read_goals(env) -> str:
+    """Цели берём из самого Инбокса (записи Тип=«Цель»). Отдельная страница не нужна —
+    единая точка правды = база Инбокс. Квартальные OKR (O1–O5) уже в системном промпте."""
     try:
-        txt = _notion(env).get_page_text(WEEK_GOALS_PAGE)
-        return txt or "(страница целей пуста)"
+        filt = {"property": "Тип", "select": {"equals": "Цель"}}
+        rows = _notion(env).query_inbox(filter_=filt, page_size=50)
+        if not rows:
+            return "(в Инбоксе пока нет записей с Тип=«Цель»)"
+        goals = [{"Название": r.get("Название"), "Objective": r.get("Objective"),
+                  "Приоритет": r.get("Приоритет"), "Статус": r.get("Статус"),
+                  "Неделя": r.get("Неделя"), "Ответственный": r.get("Ответственный")}
+                 for r in rows]
+        return json.dumps(goals, ensure_ascii=False)
     except Exception as e:  # noqa: BLE001
-        return f"(не удалось прочитать цели: {e})"
+        return f"(не удалось прочитать цели из инбокса: {e})"
 
 
 def _tool_get_inbox(env, open_only: bool) -> str:
@@ -203,7 +210,11 @@ def build_draft(question: str, env: dict) -> dict:
     for _ in range(8):
         resp = client.messages.create(
             model=model, max_tokens=2000,
-            system=[{"type": "text", "text": SYSTEM, "cache_control": {"type": "ephemeral"}}],
+            system=[
+                {"type": "text", "text": SYSTEM, "cache_control": {"type": "ephemeral"}},
+                {"type": "text", "text": f"Сегодня {today()}. Относительные даты "
+                 "(«в пятницу», «к 13 июня») считай от сегодняшней, в текущем или будущем году."},
+            ],
             tools=TOOLS, messages=messages)
 
         # Claude задал уточняющий вопрос / ответил текстом → сохраняем диалог и ждём ответа

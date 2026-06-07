@@ -36,6 +36,7 @@ sys.path.insert(0, str(BITRIX_DIR))  # чтобы импортировать bit
 OFFSET_FILE = HERE / ".bot_offset"
 STATE_FILE = HERE / ".bot_state.json"   # {chat_id: "fireflies"|"bitrix"|"priorities"}
 PENDING_FILE = HERE / ".bot_pending.json"  # {chat_id: draft} — черновик, ждущий ✅
+BOARD_CFG_FILE = HERE / ".bot_board_cfg.json"  # {chat_id: {role_key: provider}} — состав совета
 TG = "https://api.telegram.org/bot{token}/{method}"
 
 BTN_FF = "🔥 Fireflies"
@@ -395,6 +396,33 @@ def _handle_callback(env: dict, cq: dict, allowed: str) -> None:
     pend = _pending()
     draft = pend.get(chat_id)
 
+    # ── настройка состава совета (🧠) ────────────────────────────────────────
+    if data.startswith("cfg:"):
+        from board import default_config, cycle_provider, render_menu
+        action = data.split(":", 1)[1]
+        cfgs = _board_cfg()
+        cfg = cfgs.get(chat_id) or default_config()
+        msg_id = ((cq.get("message") or {}).get("message_id"))
+        if action == "done":
+            cfgs[chat_id] = cfg; _save_board_cfg(cfgs)
+            from board import effective_advisors
+            n = len(effective_advisors(cfg))
+            _answer_callback(env, cid, "Состав сохранён")
+            if msg_id:
+                _edit_inline(env, msg_id, f"🧠 Состав совета сохранён: <b>{n}</b> ролей. "
+                                          "Теперь задай стратегический вопрос 👇", {"inline_keyboard": []})
+            return
+        if action == "reset":
+            cfg = default_config()
+        else:  # тап по роли — переключаем модель по кругу
+            cfg[action] = cycle_provider(cfg.get(action, "claude"))
+        cfgs[chat_id] = cfg; _save_board_cfg(cfgs)
+        _answer_callback(env, cid)
+        if msg_id:
+            menu_text, menu_kb = render_menu(cfg)
+            _edit_inline(env, msg_id, menu_text, menu_kb)
+        return
+
     if data == "go_cancel":
         pend.pop(chat_id, None); _save_pending(pend)
         _answer_callback(env, cid, "Отменено")
@@ -461,11 +489,17 @@ def _send(env: dict, text: str, keyboard: bool = True) -> None:
                    "disable_web_page_preview": True}
         if keyboard and i == len(chunks) - 1:
             payload["reply_markup"] = json.dumps(KEYBOARD)
-        r = requests.post(TG.format(token=token, method="sendMessage"), json=payload, timeout=30).json()
-        if not r.get("ok"):  # повтор без разметки
-            payload["text"] = re.sub(r"<[^>]+>", "", chunk)
-            payload.pop("parse_mode", None)
-            requests.post(TG.format(token=token, method="sendMessage"), json=payload, timeout=30)
+        try:
+            r = requests.post(TG.format(token=token, method="sendMessage"),
+                              json=payload, timeout=30).json()
+            if not r.get("ok"):  # повтор без разметки
+                payload["text"] = re.sub(r"<[^>]+>", "", chunk)
+                payload.pop("parse_mode", None)
+                requests.post(TG.format(token=token, method="sendMessage"),
+                              json=payload, timeout=30)
+        except (requests.RequestException, ValueError) as e:
+            # сетевой сбой при отправке не должен ронять демон
+            print(f"⚠️ _send: {e}", file=sys.stderr)
         time.sleep(0.3)
 
 
@@ -547,8 +581,10 @@ def main() -> int:
                 continue
             if text == BTN_BD or text.lower() in ("совет", "/board", "/sovet"):
                 state[chat_id] = "board"; _save_state(state)
-                _send(env, "🧠 Режим: <b>Совет директоров</b>. Задай стратегический вопрос — соберу мнения "
-                           "CFO, CMO, COO, CTO и CHRO (разные ИИ-модели) в контексте бизнеса и сведу в решение.")
+                from board import render_menu
+                cfgs = _board_cfg()
+                menu_text, menu_kb = render_menu(cfgs.get(chat_id))
+                _send_inline(env, menu_text, menu_kb)
                 continue
             if text.startswith("/start"):
                 _send(env, "Привет! Выбери режим кнопкой ниже, потом напиши:\n"
@@ -564,8 +600,11 @@ def main() -> int:
                 continue
 
             print(f"← [{src}] {text[:80]}")
-            requests.post(TG.format(token=token, method="sendChatAction"),
-                          json={"chat_id": chat_id, "action": "typing"}, timeout=10)
+            try:
+                requests.post(TG.format(token=token, method="sendChatAction"),
+                              json={"chat_id": chat_id, "action": "typing"}, timeout=10)
+            except requests.RequestException:
+                pass  # индикатор «печатает» не критичен
 
             # режим приоритизации: строим черновик и показываем кнопки подтверждения
             if src == "priorities":
@@ -590,11 +629,12 @@ def main() -> int:
 
             # режим совета директоров: опрос ролей + синтез
             if src == "board":
-                _send(env, "🧠 Собираю совет директоров… (несколько ИИ думают параллельно, ~20–40 сек)",
-                      keyboard=False)
-                from board import convene, format_board
+                from board import convene, format_board, effective_advisors
+                advisors = effective_advisors(_board_cfg().get(chat_id))
+                roster = ", ".join(f"{a['short']}·{a['provider']}" for a in advisors) or "пусто"
+                _send(env, f"🧠 Собираю совет ({roster})… параллельно, ~20–40 сек.", keyboard=False)
                 try:
-                    result = convene(text, env)
+                    result = convene(text, env, advisors=advisors)
                 except Exception as e:  # noqa: BLE001
                     _send(env, f"⚠️ Совет не собрался: {e}")
                     continue
@@ -606,6 +646,8 @@ def main() -> int:
                 continue
 
             # режимы вопрос-ответ (Fireflies / Bitrix)
+            _send(env, ("🔥 Ищу в Fireflies" if src == "fireflies" else "📊 Смотрю в Bitrix")
+                       + "… это займёт ~20–30 сек, подожди.", keyboard=False)
             try:
                 reply = answer_fireflies(text, env) if src == "fireflies" else answer_bitrix(text, env)
             except Exception as e:  # noqa: BLE001
