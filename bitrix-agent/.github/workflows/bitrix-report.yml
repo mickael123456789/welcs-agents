@@ -1,0 +1,46 @@
+name: Bitrix daily report
+
+# Запуск дважды в день. Время в GitHub Actions — UTC (без перехода на летнее!).
+# Лето в Испании = CEST (UTC+2): 08:00 = 06:00 UTC, 20:00 = 18:00 UTC.
+# Зимой (CET, UTC+1) сдвинется на час — при желании поправьте cron.
+on:
+  schedule:
+    - cron: '0 6 * * *'    # ☀️ утро  — 08:00 CEST
+    - cron: '0 18 * * *'   # 🌙 вечер — 20:00 CEST
+  workflow_dispatch:        # ручной запуск кнопкой в Actions
+    inputs:
+      mode:
+        description: 'Режим (morning/evening)'
+        default: 'morning'
+
+jobs:
+  report:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install deps
+        run: pip install -r requirements.txt
+
+      - name: Determine mode
+        id: m
+        run: |
+          if [ "${{ github.event.schedule }}" = "0 18 * * *" ]; then
+            echo "mode=evening" >> "$GITHUB_OUTPUT"
+          else
+            echo "mode=${{ github.event.inputs.mode || 'morning' }}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Run agent
+        env:
+          BITRIX_WEBHOOK_URL: ${{ secrets.BITRIX_WEBHOOK_URL }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          NOTIFY_CHANNEL: telegram
+          MODEL: claude-opus-4-8
+        run: python run.py --mode ${{ steps.m.outputs.mode }}

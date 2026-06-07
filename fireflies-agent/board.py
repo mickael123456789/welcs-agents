@@ -1,0 +1,209 @@
+#!/usr/bin/env python3
+"""
+🧠 Совет директоров — режим бота @AuditorWelcs_bot.
+
+Руководитель задаёт стратегический вопрос → собирается общий бриф по бизнесу
+из ВСЕХ источников параллельно (OKR + Notion: цели недели и Инбокс + Bitrix24:
+просрочки и сделки + Fireflies: встречи за 14 дней) → 5 «директоров» (роль +
+своя модель) отвечают ПАРАЛЛЕЛЬНО → председатель (Claude) сводит в одно решение.
+
+Разные модели = реальное разнообразие мышления, а не один ИИ в пяти масках.
+Если ключа GPT/Gemini нет — роль автоматически играет Claude.
+"""
+
+from __future__ import annotations
+
+import datetime as dt
+import json
+from concurrent.futures import ThreadPoolExecutor
+
+import anthropic
+
+from model_clients import ask
+from priorities import OKR, _tool_get_inbox, _tool_read_goals
+
+BUSINESS = ("Welcs — управление краткосрочной арендой недвижимости на Costa Brava "
+            "(Испания): уборки, заезды/выезды, поддержка гостей и собственников, "
+            "маркетинг и бронирования, миграция учёта в Xero, разработка своей платформы "
+            "и AI-агентов. Руководитель — Михаил.")
+
+# Состав совета: роль + провайдер по умолчанию + фокус
+ADVISORS = [
+    {"key": "cfo", "emoji": "💰", "title": "CFO — финансовый директор", "provider": "openai",
+     "focus": "финансы, экономика юнита, кэшфлоу, окупаемость, риски затрат, миграция учёта в Xero. "
+              "Считай деньги и сроки окупаемости, называй цифры и допущения."},
+    {"key": "cmo", "emoji": "📣", "title": "CMO — директор по маркетингу", "provider": "gemini",
+     "focus": "привлечение гостей, бронирования, бренд, SMM, реклама, каналы (Booking/Airbnb/прямые), "
+              "конверсия и стоимость привлечения. Мысли ростом выручки и спросом."},
+    {"key": "coo", "emoji": "⚙️", "title": "COO — операционный директор", "provider": "claude",
+     "focus": "операции: уборки, заезды, инциденты, качество сервиса, нагрузка и процессы команды, SLA. "
+              "Думай про исполнимость, узкие места и масштабирование без потери качества."},
+    {"key": "cto", "emoji": "🧩", "title": "CTO / Product", "provider": "claude",
+     "focus": "платформа, AI-агенты, автоматизации, данные, технический долг и приоритеты разработки. "
+              "Оценивай, что автоматизировать, а что рано."},
+    {"key": "chro", "emoji": "👥", "title": "CHRO — директор по персоналу", "provider": "openai",
+     "focus": "команда: найм, роли, мотивация, удержание, структура и делегирование. "
+              "Думай про людей, нагрузку и кто что тянет."},
+]
+
+
+def _iso(days_ago: int) -> str:
+    d = dt.datetime.now(dt.timezone.utc) - dt.timedelta(days=days_ago)
+    return d.strftime("%Y-%m-%dT%H:%M:%S.000Z")
+
+
+def _notion_section(env: dict) -> str:
+    """Цели недели + текущий Инбокс из Notion."""
+    if not env.get("NOTION_API_KEY"):
+        return ""
+    out = []
+    goals = _tool_read_goals(env)
+    if goals and not goals.startswith("(не удалось"):
+        out.append(f"ЦЕЛИ НЕДЕЛИ (Notion):\n{goals[:1500]}")
+    try:
+        data = json.loads(_tool_get_inbox(env, True))
+        if data.get("items"):
+            out.append(f"ТЕКУЩИЙ ИНБОКС ({data['count']} открытых):\n" +
+                       json.dumps(data["items"][:25], ensure_ascii=False))
+    except (ValueError, TypeError):
+        pass
+    return "\n\n".join(out)
+
+
+def _bitrix_section(env: dict) -> str:
+    """Состояние Bitrix24: просроченные задачи + открытые сделки."""
+    if not env.get("BITRIX_WEBHOOK_URL"):
+        return ""
+    try:
+        from bitrix_client import Bitrix
+        bx = Bitrix(env["BITRIX_WEBHOOK_URL"])
+        now = dt.datetime.now().strftime("%Y-%m-%dT%H:%M:%S")
+        overdue = bx.call_list(
+            "tasks.task.list",
+            {"filter": {"<DEADLINE": now, "@REAL_STATUS": [2, 3]},
+             "select": ["ID", "TITLE", "DEADLINE", "RESPONSIBLE_ID"]}, max_items=30)
+        deals = bx.call_list(
+            "crm.deal.list",
+            {"filter": {"CLOSED": "N"}, "select": ["ID", "TITLE", "OPPORTUNITY"]}, max_items=50)
+        n_over = f"{len(overdue)}+" if len(overdue) >= 30 else str(len(overdue))
+        lines = [f"Просроченных задач (выборка): {n_over}"]
+        for t in overdue[:8]:
+            title = t.get("title") or t.get("TITLE") or "?"
+            dl = (t.get("deadline") or t.get("DEADLINE") or "")[:10]
+            lines.append(f"  • {title} (до {dl})")
+        n_deals = f"{len(deals)}+" if len(deals) >= 50 else str(len(deals))
+        opp = sum(float(d.get("OPPORTUNITY") or 0) for d in deals)
+        lines.append(f"Открытых сделок (выборка): {n_deals}, сумма по выборке ~{opp:.0f}")
+        return "СОСТОЯНИЕ BITRIX24:\n" + "\n".join(lines)
+    except Exception as e:  # noqa: BLE001
+        return f"(Bitrix недоступен: {e})"
+
+
+def _fireflies_section(env: dict) -> str:
+    """Сводка встреч команды за 14 дней из Fireflies."""
+    if not env.get("FIREFLIES_API_KEY"):
+        return ""
+    try:
+        from fireflies_client import Fireflies
+        items = Fireflies(env["FIREFLIES_API_KEY"]).list_transcripts(_iso(14), _iso(0), limit=20)
+        if not items:
+            return ""
+        lines = []
+        for t in items[:12]:
+            s = t.get("summary") or {}
+            summ = (s.get("short_summary") or s.get("overview") or "").replace("\n", " ")[:200]
+            lines.append(f"  • {t.get('title')} ({(t.get('dateString') or '')[:10]}): {summ}")
+        return f"ВСТРЕЧИ ЗА 14 ДНЕЙ ({len(items)}):\n" + "\n".join(lines)
+    except Exception as e:  # noqa: BLE001
+        return f"(Fireflies недоступен: {e})"
+
+
+def build_context(env: dict) -> str:
+    """Общий бриф по бизнесу из всех источников (Notion + Bitrix + Fireflies),
+    собирается ПАРАЛЛЕЛЬНО. Видит каждый советник."""
+    parts = [f"БИЗНЕС: {BUSINESS}", f"ЦЕЛИ КВАРТАЛА (OKR):\n{OKR}"]
+    with ThreadPoolExecutor(max_workers=3) as ex:
+        futures = [ex.submit(fn, env) for fn in
+                   (_notion_section, _bitrix_section, _fireflies_section)]
+        for f in futures:
+            sec = f.result()
+            if sec:
+                parts.append(sec)
+    return "\n\n".join(parts)
+
+
+def _advisor_system(adv: dict, context: str) -> str:
+    return (f"Ты — {adv['title']} в совете директоров компании. Твоя зона: {adv['focus']}\n\n"
+            f"КОНТЕКСТ БИЗНЕСА (общий для всего совета):\n{context}\n\n"
+            "Дай мнение СТРОГО со своей позиции. Будь конкретным: рекомендация, 1–2 ключевых риска "
+            "и что сделать первым шагом. Опирайся на контекст и цели. Максимум ~150 слов, по-русски. "
+            "Без воды и общих фраз.")
+
+
+def _ask_advisor(adv: dict, question: str, context: str, env: dict) -> dict:
+    system = _advisor_system(adv, context)
+    try:
+        text, used = ask(adv["provider"], system, question, env, max_tokens=600)
+    except Exception as e:  # noqa: BLE001
+        text, used = f"(не удалось получить мнение: {e})", "—"
+    return {**adv, "text": text, "used": used}
+
+
+CHAIR_TOOL = [{
+    "name": "board_decision",
+    "description": "Итоговое решение председателя совета. Вызови один раз.",
+    "input_schema": {"type": "object", "properties": {
+        "title": {"type": "string", "description": "Короткий заголовок решения/вопроса."},
+        "objective": {"type": "string",
+                      "enum": ["O1 Платформа", "O2 AI-агенты", "O3 Задачи и автоматизации",
+                               "O4 Xero", "O5 Личный рост", "Без цели"]},
+        "recommendation": {"type": "string", "description": "Чёткая рекомендация совета (2–4 предложения)."},
+        "next_step": {"type": "string", "description": "Конкретный первый шаг."},
+        "disagreement": {"type": "string", "description": "Где директора разошлись (если разошлись)."}},
+        "required": ["title", "objective", "recommendation", "next_step"]}}]
+
+
+def _synthesize(question: str, opinions: list[dict], context: str, env: dict) -> dict:
+    client = anthropic.Anthropic(api_key=env["ANTHROPIC_API_KEY"])
+    model = env.get("MODEL", "claude-opus-4-8")
+    board_text = "\n\n".join(f"{o['emoji']} {o['title']} ({o['used']}):\n{o['text']}" for o in opinions)
+    system = ("Ты — председатель совета директоров (CEO). Тебе даны вопрос руководителя и мнения "
+              f"директоров. КОНТЕКСТ:\n{context}\n\nВзвесь мнения, разреши противоречия и прими решение "
+              "в интересах бизнеса. Вызови board_decision.")
+    user = f"ВОПРОС РУКОВОДИТЕЛЯ:\n{question}\n\nМНЕНИЯ СОВЕТА:\n{board_text}"
+    resp = client.messages.create(
+        model=model, max_tokens=1500,
+        system=[{"type": "text", "text": system}],
+        tools=CHAIR_TOOL, tool_choice={"type": "tool", "name": "board_decision"},
+        messages=[{"role": "user", "content": user}])
+    for b in resp.content:
+        if b.type == "tool_use" and b.name == "board_decision":
+            return dict(b.input)
+    return {"title": question[:80], "objective": "Без цели",
+            "recommendation": "(не удалось свести мнения)", "next_step": ""}
+
+
+def convene(question: str, env: dict) -> dict:
+    """Собирает совет: возвращает {opinions, decision, context}."""
+    context = build_context(env)
+    with ThreadPoolExecutor(max_workers=len(ADVISORS)) as ex:
+        opinions = list(ex.map(lambda a: _ask_advisor(a, question, context, env), ADVISORS))
+    decision = _synthesize(question, opinions, context, env)
+    return {"opinions": opinions, "decision": decision}
+
+
+def format_board(question: str, result: dict) -> str:
+    lines = [f"🧠 <b>Совет директоров</b> по вопросу:", f"<i>{question[:300]}</i>", ""]
+    for o in result["opinions"]:
+        lines.append(f"{o['emoji']} <b>{o['title']}</b> · <i>{o['used']}</i>")
+        lines.append(o["text"])
+        lines.append("")
+    d = result["decision"]
+    lines.append("━━━━━━━━━━━━━━")
+    lines.append(f"🎯 <b>Решение председателя</b> (цель: {d.get('objective', '—')})")
+    lines.append(d.get("recommendation", ""))
+    if d.get("next_step"):
+        lines.append(f"\n👉 <b>Первый шаг:</b> {d['next_step']}")
+    if d.get("disagreement"):
+        lines.append(f"\n⚖️ <i>Разногласия: {d['disagreement']}</i>")
+    return "\n".join(lines)

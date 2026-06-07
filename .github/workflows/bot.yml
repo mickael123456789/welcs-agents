@@ -1,0 +1,53 @@
+name: Telegram bot (24/7 keep-alive)
+
+# Живой бот-роутер (кнопки 🔥 Fireflies / 📊 Bitrix / 🎯 Цели / 🧠 Совет).
+# GitHub Actions ограничивает job ~6 часами, поэтому бот работает ~5ч40м и
+# корректно выходит, после чего запускает себя заново (см. шаг «Keep alive»).
+#   • Если задан секрет BOT_PAT — перезапуск почти мгновенный (пауза ~секунды).
+#   • Если нет — подстраховка: расписание перезапускает каждые 6 часов.
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '0 */6 * * *'   # подстраховка на случай обрыва цепочки
+
+concurrency:
+  group: telegram-bot       # гарантирует, что одновременно жив только ОДИН бот
+  cancel-in-progress: false # (иначе Telegram отдаёт 409 двум слушателям)
+
+jobs:
+  bot:
+    runs-on: ubuntu-latest
+    timeout-minutes: 350     # потолок job'а; бот выходит раньше (BOT_MAX_RUNTIME)
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install deps
+        run: pip install -r requirements.txt
+
+      - name: Run bot (~5h40m, затем мягкий выход)
+        working-directory: fireflies-agent
+        env:
+          FIREFLIES_API_KEY: ${{ secrets.FIREFLIES_API_KEY }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          BITRIX_WEBHOOK_URL: ${{ secrets.BITRIX_WEBHOOK_URL }}
+          NOTION_API_KEY: ${{ secrets.NOTION_API_KEY }}
+          MODEL: claude-opus-4-8
+          BOT_MAX_RUNTIME: '20400'   # 5ч40м в секундах
+        run: python bot.py
+
+      - name: Keep alive — перезапустить workflow
+        if: always()
+        env:
+          GH_TOKEN: ${{ secrets.BOT_PAT }}
+        run: |
+          if [ -n "$GH_TOKEN" ]; then
+            gh workflow run bot.yml -R "${{ github.repository }}" && echo "перезапуск отправлен"
+          else
+            echo "BOT_PAT не задан — полагаемся на расписание (рестарт каждые 6 ч)."
+          fi

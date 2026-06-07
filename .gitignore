@@ -1,0 +1,27 @@
+# Секреты и локальное окружение — НИКОГДА не коммитим
+.env
+**/.env
+.venv/
+
+# Логи и отчёты (создаются в рантайме)
+reports/
+**/reports/
+
+# Локальное состояние бота (в облаке создаётся заново)
+.bot_offset
+.bot_state.json
+.bot_pending.json
+**/.bot_offset
+**/.bot_state.json
+**/.bot_pending.json
+
+# Python
+__pycache__/
+**/__pycache__/
+*.pyc
+
+# macOS
+.DS_Store
+
+# Внимание: commitments.json (реестр дедлайнов) НЕ игнорируется —
+# он сохраняется между запусками через коммит из GitHub Actions.

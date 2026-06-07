@@ -1,0 +1,85 @@
+name: Daily reports (Fireflies + Bitrix)
+
+# Ежедневные сводки в Telegram — утром и вечером. Время в Actions — UTC.
+# Лето в Испании (CEST = UTC+2): 09:00 = 07:00 UTC, 20:00 = 18:00 UTC.
+# Зимой (CET = UTC+1) сдвинется на час — при желании поправь cron ниже.
+on:
+  schedule:
+    - cron: '0 7 * * *'    # ☀️ утро  — напоминания о дедлайнах на сегодня
+    - cron: '0 18 * * *'   # 🌙 вечер — итоги дня команды
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: 'morning или evening (для ручного запуска)'
+        default: 'evening'
+
+permissions:
+  contents: write          # чтобы коммитить обновлённый реестр дедлайнов
+
+concurrency:
+  group: daily-reports
+  cancel-in-progress: false
+
+jobs:
+  reports:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install deps
+        run: pip install -r requirements.txt
+
+      - name: Determine mode
+        id: m
+        run: |
+          if [ "${{ github.event.schedule }}" = "0 18 * * *" ]; then
+            echo "mode=evening" >> "$GITHUB_OUTPUT"
+          elif [ "${{ github.event.schedule }}" = "0 7 * * *" ]; then
+            echo "mode=morning" >> "$GITHUB_OUTPUT"
+          else
+            echo "mode=${{ github.event.inputs.mode || 'evening' }}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Fireflies report
+        continue-on-error: true       # если упадёт — Bitrix всё равно отработает
+        working-directory: fireflies-agent
+        env:
+          FIREFLIES_API_KEY: ${{ secrets.FIREFLIES_API_KEY }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          ME_EMAILS: ${{ secrets.ME_EMAILS }}
+          TEAM_DOMAINS: ${{ secrets.TEAM_DOMAINS }}
+          TEAM_EMAILS: ${{ secrets.TEAM_EMAILS }}
+          MODEL: claude-opus-4-8
+          NOTIFY_CHANNEL: telegram
+        run: python run.py --mode ${{ steps.m.outputs.mode }}
+
+      - name: Bitrix report
+        continue-on-error: true
+        working-directory: bitrix-agent
+        env:
+          BITRIX_WEBHOOK_URL: ${{ secrets.BITRIX_WEBHOOK_URL }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          MODEL: claude-opus-4-8
+          NOTIFY_CHANNEL: telegram
+        run: python run.py --mode ${{ steps.m.outputs.mode }}
+
+      - name: Persist deadlines ledger
+        if: always()        # сохраняем реестр дедлайнов между запусками
+        run: |
+          git config user.name "welcs-bot"
+          git config user.email "actions@users.noreply.github.com"
+          git add fireflies-agent/commitments.json || true
+          if ! git diff --cached --quiet; then
+            git commit -m "ledger: обновление дедлайнов [skip ci]"
+            git push || true
+          else
+            echo "реестр без изменений"
+          fi
