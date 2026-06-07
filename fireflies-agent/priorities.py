@@ -259,57 +259,25 @@ def format_draft(d: dict) -> str:
 
 
 def commit_draft(d: dict, env: dict) -> str:
-    """Создаёт запись в Notion и (если делегировано) задачу в Bitrix. Возвращает отчёт."""
-    report = []
-
-    # 1) Bitrix-задача (если делегировано не на самого себя)
-    bitrix_ref = None
+    """Создаёт запись ТОЛЬКО в Notion-инбоксе (в Bitrix задачи не ставим). Возвращает отчёт."""
     resp_name = d.get("responsible")
-    if d.get("delegate_to_bitrix") and resp_name and resp_name != "Михаил (сам)":
-        uid = MANAGERS.get(resp_name)
-        if not uid:
-            report.append(f"⚠️ Не нашёл Bitrix ID для {resp_name} — задачу в Bitrix не поставил.")
-        elif not env.get("BITRIX_WEBHOOK_URL"):
-            report.append("⚠️ Нет BITRIX_WEBHOOK_URL — задачу в Bitrix не поставил.")
-        else:
-            try:
-                from bitrix_client import Bitrix
-                bx = Bitrix(env["BITRIX_WEBHOOK_URL"])
-                fields = {
-                    "TITLE": d.get("title", "Задача"),
-                    "RESPONSIBLE_ID": uid,
-                    "CREATED_BY": MANAGERS["Михаил (сам)"],
-                    "DESCRIPTION": (d.get("done_when") or "") +
-                                   (f"\n\nЦель: {d.get('objective')}" if d.get("objective") else "") +
-                                   "\n\n(Поставлено через бот приоритизации @AuditorWelcs_bot)",
-                }
-                if d.get("deadline"):
-                    fields["DEADLINE"] = d["deadline"]
-                res = bx.call("tasks.task.add", {"fields": fields})
-                tid = (res or {}).get("task", {}).get("id") if isinstance(res, dict) else None
-                if tid:
-                    bitrix_ref = f"Bitrix #{tid} → {resp_name}"
-                    report.append(f"✅ Задача в Bitrix поставлена: #{tid} → {resp_name}")
-                else:
-                    report.append(f"✅ Задача в Bitrix отправлена ({resp_name}).")
-            except Exception as e:  # noqa: BLE001
-                report.append(f"⚠️ Bitrix: не удалось поставить задачу — {e}")
-
-    # 2) Запись в Notion Inbox
     try:
-        week = d.get("week")
-        deadline = d.get("deadline") or None
         n = _notion(env)
         res = n.create_inbox_entry(
             title=d.get("title", "Без названия"),
             tip=d.get("tip"), objective=d.get("objective"),
             priority=d.get("priority"), responsible=resp_name,
-            week=week, deadline=deadline, done_when=d.get("done_when"),
-            bitrix_task=bitrix_ref)
-        report.append(f"✅ Записал в Notion: <a href=\"{res['url']}\">{d.get('title')}</a>")
+            week=d.get("week"), deadline=d.get("deadline") or None,
+            done_when=d.get("done_when"),
+            expected_result=d.get("expected_result"),
+            reasoning=d.get("reasoning"))
     except Exception as e:  # noqa: BLE001
-        report.append(f"⚠️ Notion: не удалось записать — {e}")
+        return f"⚠️ Notion: не удалось записать — {e}"
 
+    report = [f"✅ Записал в Notion: <a href=\"{res['url']}\">{d.get('title')}</a>"]
+    if resp_name and resp_name != "Михаил (сам)":
+        report.append(f"👤 Ответственный: {resp_name} — задачу разберёт и раздаст ассистент/руководитель "
+                      f"(в Bitrix автоматически НЕ ставится).")
     return "\n".join(report)
 
 

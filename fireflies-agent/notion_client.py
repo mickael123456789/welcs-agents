@@ -92,7 +92,8 @@ class Notion:
                            objective: str | None = None, status: str = "Not started",
                            priority: str | None = None, responsible: str | None = None,
                            week: str | None = None, deadline: str | None = None,
-                           done_when: str | None = None, source: str = "Telegram-бот",
+                           done_when: str | None = None, expected_result: str | None = None,
+                           reasoning: str | None = None, source: str = "Telegram-бот",
                            bitrix_task: str | None = None) -> dict:
         """Создаёт запись в базе Инбокса. Возвращает {id, url}."""
         props: dict[str, Any] = {
@@ -117,7 +118,19 @@ class Notion:
         if bitrix_task:
             props["Bitrix Task"] = {"rich_text": [{"text": {"content": bitrix_task}}]}
 
-        data = self._request("POST", "/pages",
+        # тело страницы: ожидаемый результат, критерий успеха, обоснование
+        children = []
+        for label, val in (("🎯 Ожидаемый результат", expected_result),
+                           ("✅ Критерий успеха", done_when),
+                           ("💭 Обоснование", reasoning)):
+            if val:
+                children.append({"object": "block", "type": "paragraph", "paragraph": {
+                    "rich_text": [{"text": {"content": f"{label}: {val}"[:1900]}}]}})
+
+        body: dict[str, Any] = {"parent": {"database_id": INBOX_DB_ID}, "properties": props}
+        if children:
+            body["children"] = children
+        data = self._request("POST", "/pages", body)
                              {"parent": {"database_id": INBOX_DB_ID}, "properties": props})
         return {"id": data.get("id"), "url": data.get("url")}
 
