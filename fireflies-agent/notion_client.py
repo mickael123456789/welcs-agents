@@ -131,7 +131,6 @@ class Notion:
         if children:
             body["children"] = children
         data = self._request("POST", "/pages", body)
-                             {"parent": {"database_id": INBOX_DB_ID}, "properties": props})
         return {"id": data.get("id"), "url": data.get("url")}
 
 

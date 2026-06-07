@@ -344,6 +344,27 @@ def _save_pending(p: dict) -> None:
     PENDING_FILE.write_text(json.dumps(p, ensure_ascii=False))
 
 
+def _board_cfg() -> dict:
+    try:
+        return json.loads(BOARD_CFG_FILE.read_text())
+    except (OSError, ValueError):
+        return {}
+
+
+def _save_board_cfg(c: dict) -> None:
+    BOARD_CFG_FILE.write_text(json.dumps(c, ensure_ascii=False))
+
+
+def _edit_inline(env: dict, message_id: int, text: str, inline_markup: dict) -> None:
+    """Редактирует ранее отправленное сообщение (для меню настройки совета)."""
+    from notify_telegram import _md_to_tg_html
+    requests.post(TG.format(token=env["TELEGRAM_BOT_TOKEN"], method="editMessageText"),
+                  json={"chat_id": env["TELEGRAM_CHAT_ID"], "message_id": message_id,
+                        "text": _md_to_tg_html(text), "parse_mode": "HTML",
+                        "disable_web_page_preview": True,
+                        "reply_markup": json.dumps(inline_markup)}, timeout=30)
+
+
 def _send_inline(env: dict, text: str, inline_markup: dict) -> None:
     """Отправка сообщения с inline-кнопками (для черновика записи)."""
     from notify_telegram import _md_to_tg_html
