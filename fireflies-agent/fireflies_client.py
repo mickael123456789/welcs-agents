@@ -7,6 +7,7 @@
 
 from __future__ import annotations
 
+import datetime as dt
 import time
 from typing import Any
 
@@ -37,8 +38,15 @@ _TRANSCRIPT_FIELDS = """
 """
 
 _LIST_QUERY = f"""
-query Transcripts($fromDate: DateTime, $toDate: DateTime, $limit: Int, $skip: Int) {{
-  transcripts(fromDate: $fromDate, toDate: $toDate, limit: $limit, skip: $skip) {{
+query Transcripts(
+  $fromDate: DateTime, $toDate: DateTime, $limit: Int, $skip: Int,
+  $title: String, $participantEmail: String, $hostEmail: String, $organizerEmail: String
+) {{
+  transcripts(
+    fromDate: $fromDate, toDate: $toDate, limit: $limit, skip: $skip,
+    title: $title, participant_email: $participantEmail,
+    host_email: $hostEmail, organizer_email: $organizerEmail
+  ) {{
     {_TRANSCRIPT_FIELDS}
   }}
 }}
@@ -79,17 +87,39 @@ class Fireflies:
 
     def list_transcripts(
         self,
-        from_iso: str,
-        to_iso: str,
+        from_iso: str | None,
+        to_iso: str | None,
         limit: int = 50,
+        *,
+        title: str | None = None,
+        participant_email: str | None = None,
+        host_email: str | None = None,
+        organizer_email: str | None = None,
+        max_total: int = 300,
     ) -> list[dict[str, Any]]:
-        """Все встречи в окне [from_iso, to_iso] (ISO 8601), с пагинацией."""
+        """Встречи в окне [from_iso, to_iso] (ISO 8601), с пагинацией.
+
+        Окно фактически необязательно: можно передать None в обе даты и искать
+        по всей истории через фильтры title / participant_email / host_email /
+        organizer_email (нативные фильтры Fireflies). Любой из аргументов None
+        просто не отправляется в запрос.
+        """
+        base: dict[str, Any] = {
+            "fromDate": from_iso,
+            "toDate": to_iso,
+            "title": title,
+            "participantEmail": participant_email,
+            "hostEmail": host_email,
+            "organizerEmail": organizer_email,
+        }
+        # Fireflies не любит явный null у части фильтров — убираем пустые.
+        base = {k: v for k, v in base.items() if v is not None}
+
         out: list[dict[str, Any]] = []
         skip = 0
         while True:
             page = self._post(_LIST_QUERY, {
-                "fromDate": from_iso,
-                "toDate": to_iso,
+                **base,
                 "limit": min(limit, 50),
                 "skip": skip,
             }).get("transcripts") or []
@@ -97,9 +127,33 @@ class Fireflies:
             if len(page) < min(limit, 50):
                 break
             skip += len(page)
-            if skip >= 300:  # предохранитель
+            if skip >= max_total:  # предохранитель
                 break
         return out
+
+    def search_transcripts(
+        self,
+        title: str | None = None,
+        participant_email: str | None = None,
+        days: int | None = None,
+        limit: int = 50,
+    ) -> list[dict[str, Any]]:
+        """Поиск встреч по теме/участнику по всей истории (или за N дней).
+
+        Если days задан — ограничиваем окно последними N днями, иначе ищем по
+        всей истории Fireflies. Хотя бы один из title/participant_email обычно
+        нужен, чтобы поиск был осмысленным.
+        """
+        from_iso = to_iso = None
+        if days:
+            now = dt.datetime.now(dt.timezone.utc)
+            to_iso = now.strftime("%Y-%m-%dT%H:%M:%S.000Z")
+            from_iso = (now - dt.timedelta(days=days)).strftime("%Y-%m-%dT%H:%M:%S.000Z")
+        return self.list_transcripts(
+            from_iso, to_iso, limit=limit,
+            title=title or None,
+            participant_email=participant_email or None,
+        )
 
     def get_detail(self, transcript_id: str) -> dict[str, Any]:
         """Полная стенограмма одной встречи: реплики (кто что сказал) + summary."""

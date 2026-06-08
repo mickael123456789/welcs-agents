@@ -94,17 +94,37 @@ FF_SYSTEM = """\
 переговоры с партнёрами/инвесторами/клиентами).
 
 Инструменты:
-- list_recent_meetings(days) — список встреч за период с короткими резюме. Начинай с него.
+- search_meetings(query, participant_email, days) — ПОИСК встреч по теме/названию или \
+  участнику по ВСЕЙ истории Fireflies (не только последние). Это главный инструмент: \
+  если в вопросе есть тема, имя человека, компания, проект или ключевое слово — \
+  начинай отсюда. days оставляй пустым, чтобы искать по всей истории.
+- list_recent_meetings(days) — список последних встреч за период. Используй ТОЛЬКО когда \
+  вопрос именно про «последние / недавние» встречи без конкретной темы.
 - get_meeting_transcript(meeting_id) — полная стенограмма встречи + action items.
+
+ВАЖНО: не ограничивайся последними встречами. Если по теме ничего не нашлось — попробуй \
+другие ключевые слова (синонимы, имя участника, название компании) и поиск без ограничения \
+по дате. Только если после нескольких попыток пусто — скажи, что встреча не найдена.
 
 Отвечай по-русски, кратко, по делу. Опирайся только на содержимое встреч. Если расшифровки \
 нет или встреча не найдена — скажи прямо. Указывай название и дату встречи при ссылке."""
 
 FF_TOOLS = [
-    {"name": "list_recent_meetings",
-     "description": "Список встреч за последние N дней с короткими резюме и участниками.",
+    {"name": "search_meetings",
+     "description": "Поиск встреч по теме/названию или участнику по ВСЕЙ истории Fireflies. "
+                    "Главный инструмент поиска — используй, когда в вопросе есть тема, "
+                    "ключевое слово, имя человека или компания. Возвращает встречи с резюме.",
      "input_schema": {"type": "object", "properties": {
-         "days": {"type": "integer", "description": "За сколько дней (по умолчанию 30, макс 120)."}}}},
+         "query": {"type": "string", "description": "Тема/ключевое слово/название встречи "
+                   "(ищет по заголовку встречи)."},
+         "participant_email": {"type": "string", "description": "E-mail участника (необязательно)."},
+         "days": {"type": "integer", "description": "Ограничить последними N днями "
+                  "(необязательно; по умолчанию ищет по всей истории)."}}}},
+    {"name": "list_recent_meetings",
+     "description": "Список последних встреч за N дней с короткими резюме и участниками. "
+                    "Только для вопросов про недавние встречи без конкретной темы.",
+     "input_schema": {"type": "object", "properties": {
+         "days": {"type": "integer", "description": "За сколько дней (по умолчанию 30, макс 365)."}}}},
     {"name": "get_meeting_transcript",
      "description": "Полная стенограмма встречи по id (реплики по спикерам, action items).",
      "input_schema": {"type": "object", "properties": {"meeting_id": {"type": "string"}},
@@ -117,9 +137,7 @@ def _iso(days_ago: int) -> str:
     return d.strftime("%Y-%m-%dT%H:%M:%S.000Z")
 
 
-def _ff_list(ff, days: int) -> str:
-    days = max(1, min(int(days or 30), 120))
-    items = ff.list_transcripts(_iso(days), _iso(0), limit=50)
+def _ff_format(items: list) -> str:
     out = []
     for t in items:
         s = t.get("summary") or {}
@@ -129,6 +147,30 @@ def _ff_list(ff, days: int) -> str:
                     "short_summary": s.get("short_summary") or s.get("overview"),
                     "action_items": s.get("action_items")})
     return json.dumps(out, ensure_ascii=False)
+
+
+def _ff_list(ff, days: int) -> str:
+    days = max(1, min(int(days or 30), 365))
+    return _ff_format(ff.list_transcripts(_iso(days), _iso(0), limit=50))
+
+
+def _ff_search(ff, query: str, participant_email: str = "", days: int = 0) -> str:
+    """Поиск по всей истории Fireflies по теме/названию или участнику."""
+    query = (query or "").strip()
+    participant_email = (participant_email or "").strip()
+    if not query and not participant_email:
+        return json.dumps({"error": "нужно указать тему (query) или e-mail участника"},
+                          ensure_ascii=False)
+    days = min(int(days), 365) if days else None
+    items = ff.search_transcripts(title=query or None,
+                                  participant_email=participant_email or None,
+                                  days=days, limit=50)
+    if not items:
+        return json.dumps({"found": 0, "query": query, "participant_email": participant_email,
+                           "note": "По этому запросу встреч не найдено. Попробуй другое "
+                                   "ключевое слово / синоним / имя участника."},
+                          ensure_ascii=False)
+    return _ff_format(items)
 
 
 def _ff_transcript(ff, mid: str) -> str:
@@ -166,8 +208,14 @@ def answer_fireflies(question: str, env: dict) -> str:
             if b.type != "tool_use":
                 continue
             try:
-                out = (_ff_list(ff, b.input.get("days", 30)) if b.name == "list_recent_meetings"
-                       else _ff_transcript(ff, b.input.get("meeting_id", "")))
+                if b.name == "search_meetings":
+                    out = _ff_search(ff, b.input.get("query", ""),
+                                     b.input.get("participant_email", ""),
+                                     b.input.get("days", 0))
+                elif b.name == "list_recent_meetings":
+                    out = _ff_list(ff, b.input.get("days", 30))
+                else:
+                    out = _ff_transcript(ff, b.input.get("meeting_id", ""))
             except Exception as e:  # noqa: BLE001
                 out = json.dumps({"error": str(e)}, ensure_ascii=False)
             results.append({"type": "tool_result", "tool_use_id": b.id, "content": out})
