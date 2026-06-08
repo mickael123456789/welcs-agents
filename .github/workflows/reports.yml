@@ -3,10 +3,12 @@ name: Daily reports (Fireflies + Bitrix)
 # Ежедневные сводки в Telegram — утром и вечером. Время в Actions — UTC.
 # Лето в Испании (CEST = UTC+2): 09:00 = 07:00 UTC, 20:00 = 18:00 UTC.
 # Зимой (CET = UTC+1) сдвинется на час — при желании поправь cron ниже.
+# ВАЖНО: минуты НЕ ставим на :00 — расписание GitHub Actions в начале часа
+# перегружено и часто пропускает/задерживает запуск. :07 заметно надёжнее.
 on:
   schedule:
-    - cron: '0 7 * * *'    # ☀️ утро  — напоминания о дедлайнах на сегодня
-    - cron: '0 18 * * *'   # 🌙 вечер — итоги дня команды
+    - cron: '7 7 * * *'    # ☀️ утро (~09:07 CEST) — напоминания о дедлайнах на сегодня
+    - cron: '7 18 * * *'   # 🌙 вечер (~20:07 CEST) — итоги дня команды
   workflow_dispatch:
     inputs:
       mode:
@@ -36,9 +38,9 @@ jobs:
       - name: Determine mode
         id: m
         run: |
-          if [ "${{ github.event.schedule }}" = "0 18 * * *" ]; then
+          if [ "${{ github.event.schedule }}" = "7 18 * * *" ]; then
             echo "mode=evening" >> "$GITHUB_OUTPUT"
-          elif [ "${{ github.event.schedule }}" = "0 7 * * *" ]; then
+          elif [ "${{ github.event.schedule }}" = "7 7 * * *" ]; then
             echo "mode=morning" >> "$GITHUB_OUTPUT"
           else
             echo "mode=${{ github.event.inputs.mode || 'evening' }}" >> "$GITHUB_OUTPUT"
