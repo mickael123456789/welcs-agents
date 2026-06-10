@@ -46,6 +46,15 @@ jobs:
             echo "mode=${{ github.event.inputs.mode || 'evening' }}" >> "$GITHUB_OUTPUT"
           fi
 
+      - name: Morning nudge (прогон дня)
+        if: steps.m.outputs.mode == 'morning'
+        continue-on-error: true
+        working-directory: fireflies-agent
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: python morning_nudge.py
+
       - name: Fireflies report
         continue-on-error: true       # если упадёт — Bitrix всё равно отработает
         working-directory: fireflies-agent

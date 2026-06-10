@@ -133,6 +133,78 @@ class Notion:
         data = self._request("POST", "/pages", body)
         return {"id": data.get("id"), "url": data.get("url")}
 
+    # ── цели (3/6/12 мес) и дневной прогон ──────────────────────────────────────
+
+    def ensure_goal_props(self) -> None:
+        """Идемпотентно добавляет в Инбокс свойства для целей: «Горизонт» и «Прогресс %»."""
+        db = self._request("GET", f"/databases/{INBOX_DB_ID}")
+        props = db.get("properties", {})
+        add: dict[str, Any] = {}
+        if "Горизонт" not in props:
+            add["Горизонт"] = {"select": {"options": [
+                {"name": "3 мес", "color": "blue"},
+                {"name": "6 мес", "color": "purple"},
+                {"name": "1 год", "color": "green"}]}}
+        if "Прогресс %" not in props:
+            add["Прогресс %"] = {"number": {"format": "percent"}}
+        if add:
+            self._request("PATCH", f"/databases/{INBOX_DB_ID}", {"properties": add})
+
+    def query_goals(self, horizon: str | None = None) -> list[dict]:
+        """Цели = записи Тип=«Цель», опционально по горизонту (3 мес/6 мес/1 год)."""
+        cond: list[dict] = [{"property": "Тип", "select": {"equals": "Цель"}}]
+        if horizon:
+            cond.append({"property": "Горизонт", "select": {"equals": horizon}})
+        filt = cond[0] if len(cond) == 1 else {"and": cond}
+        return self.query_inbox(filter_=filt, page_size=50)
+
+    def create_goal(self, *, title: str, horizon: str | None = None,
+                    objective: str | None = None, why: str | None = None) -> dict:
+        """Создаёт цель (Тип=«Цель») с горизонтом 3/6/12 мес. why → в тело страницы."""
+        props: dict[str, Any] = {
+            "Название": {"title": [{"text": {"content": title[:2000]}}]},
+            "Тип": {"select": {"name": "Цель"}},
+            "Статус": {"select": {"name": "Активна"}},
+            "Источник": {"select": {"name": "Telegram-бот"}},
+        }
+        if horizon:
+            props["Горизонт"] = {"select": {"name": horizon}}
+        if objective:
+            props["Objective"] = {"select": {"name": objective}}
+        children = []
+        if why:
+            children.append({"object": "block", "type": "paragraph", "paragraph": {
+                "rich_text": [{"text": {"content": f"Зачем: {why}"[:1900]}}]}})
+        body: dict[str, Any] = {"parent": {"database_id": INBOX_DB_ID}, "properties": props}
+        if children:
+            body["children"] = children
+        data = self._request("POST", "/pages", body)
+        return {"id": data.get("id"), "url": data.get("url")}
+
+    def create_day_plan(self, *, date: str, body_md: str, alignment: int | None = None) -> dict:
+        """Сохраняет утренний прогон дня как запись Тип=«Прогон дня» с разбором в теле."""
+        props: dict[str, Any] = {
+            "Название": {"title": [{"text": {"content": f"🌅 Прогон дня {date}"}}]},
+            "Тип": {"select": {"name": "Прогон дня"}},
+            "Статус": {"select": {"name": "Done"}},
+            "Источник": {"select": {"name": "Telegram-бот"}},
+            "Дедлайн": {"date": {"start": date}},
+        }
+        if alignment is not None:
+            props["Прогресс %"] = {"number": max(0.0, min(alignment, 100)) / 100.0}
+        # тело — разбор по абзацам (Notion ограничивает блок ~2000 символов)
+        children = []
+        for para in (body_md or "").split("\n"):
+            para = para.strip()
+            if para:
+                children.append({"object": "block", "type": "paragraph", "paragraph": {
+                    "rich_text": [{"text": {"content": para[:1900]}}]}})
+        body: dict[str, Any] = {"parent": {"database_id": INBOX_DB_ID}, "properties": props}
+        if children:
+            body["children"] = children[:90]
+        data = self._request("POST", "/pages", body)
+        return {"id": data.get("id"), "url": data.get("url")}
+
 
 # ── вспомогательные преобразователи ──────────────────────────────────────────
 

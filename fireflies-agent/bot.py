@@ -43,8 +43,10 @@ BTN_FF = "🔥 Fireflies"
 BTN_BX = "📊 Bitrix"
 BTN_GO = "🎯 Цели"
 BTN_BD = "🧠 Совет"
+BTN_MO = "🌅 Утро"
 KEYBOARD = {
-    "keyboard": [[{"text": BTN_FF}, {"text": BTN_BX}], [{"text": BTN_GO}, {"text": BTN_BD}]],
+    "keyboard": [[{"text": BTN_FF}, {"text": BTN_BX}], [{"text": BTN_GO}, {"text": BTN_BD}],
+                 [{"text": BTN_MO}]],
     "resize_keyboard": True,
     "is_persistent": True,
     "input_field_placeholder": "Выбери режим кнопкой, потом напиши",
@@ -634,12 +636,20 @@ def main() -> int:
                 menu_text, menu_kb = render_menu(cfgs.get(chat_id))
                 _send_inline(env, menu_text, menu_kb)
                 continue
+            if text == BTN_MO or text.lower() in ("утро", "/morning", "/utro"):
+                state[chat_id] = "morning"; _save_state(state)
+                _send(env, "🌅 Режим: <b>Утро</b>. Напиши, что планируешь сегодня (списком) — прогоню "
+                           "каждую задачу по твоим вопросам (хочу/важно/нужно, кайф, зачем на самом деле, "
+                           "сам или делегировать) и сверю с целями на 3/6/12 мес.\n\n"
+                           "Можешь и задать цели: напиши, например, «цель на 3 месяца: …».")
+                continue
             if text.startswith("/start"):
                 _send(env, "Привет! Выбери режим кнопкой ниже, потом напиши:\n"
                             "🔥 <b>Fireflies</b> — про встречи команды и собеседования.\n"
                             "📊 <b>Bitrix</b> — про CRM, сделки, задачи, чаты.\n"
                             "🎯 <b>Цели</b> — кидай мысли/идеи/задачи, разберу по целям и запишу в Notion.\n"
-                            "🧠 <b>Совет</b> — стратегический вопрос → совет директоров из разных ИИ.")
+                            "🧠 <b>Совет</b> — стратегический вопрос → совет директоров из разных ИИ.\n"
+                            "🌅 <b>Утро</b> — утренний прогон задач дня по твоим вопросам + связь с целями.")
                 continue
 
             src = state.get(chat_id)
@@ -691,6 +701,21 @@ def main() -> int:
                     pend = _pending(); pend[chat_id + ":board"] = result["decision"]; _save_pending(pend)
                     _send_inline(env, "Записать это решение в Notion?", BOARD_KEYBOARD)
                 print("→ совет отправлен")
+                continue
+
+            # режим утреннего прогона дня
+            if src == "morning":
+                if not env.get("NOTION_API_KEY"):
+                    _send(env, "⚠️ Режим 🌅 Утро не настроен: нужен <b>NOTION_API_KEY</b> (цели хранятся в Notion).")
+                    continue
+                _send(env, "🌅 Прогоняю день по твоим вопросам… ~20–30 сек.", keyboard=False)
+                from morning import morning_review
+                try:
+                    reply = morning_review(text, env)
+                except Exception as e:  # noqa: BLE001
+                    reply = f"⚠️ Ошибка прогона: {e}"
+                _send(env, reply)
+                print("→ прогон отправлен")
                 continue
 
             # режимы вопрос-ответ (Fireflies / Bitrix)
