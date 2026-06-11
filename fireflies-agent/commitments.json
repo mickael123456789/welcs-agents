@@ -1,1 +1,93 @@
-[]
+[
+  {
+    "id": "380af032c2ff",
+    "who": "Welcome Solutions",
+    "what": "Investigate and update the deprecated Office viewer extension in the platform to ensure compatibility and security",
+    "due_date": null,
+    "to_me": false,
+    "source_id": "01KTS1W9FSSP4XYN31182R13YF",
+    "source_title": "Лаборатория Вайбкодинга",
+    "source_date": "2026-06-11T14:00:00.000Z",
+    "status": "open",
+    "first_seen": "2026-06-11",
+    "last_seen": "2026-06-11"
+  },
+  {
+    "id": "672d6b72de31",
+    "who": "Tech Welcs",
+    "what": "Review and troubleshoot folder and dashboard access issues, focusing on business search folder functionality",
+    "due_date": null,
+    "to_me": false,
+    "source_id": "01KTS1W9FSSP4XYN31182R13YF",
+    "source_title": "Лаборатория Вайбкодинга",
+    "source_date": "2026-06-11T14:00:00.000Z",
+    "status": "open",
+    "first_seen": "2026-06-11",
+    "last_seen": "2026-06-11"
+  },
+  {
+    "id": "17183e018158",
+    "who": "Tech Welcs",
+    "what": "Address internet connectivity issues impacting platform use and business tools for stable network infrastructure",
+    "due_date": null,
+    "to_me": false,
+    "source_id": "01KTS1W9FSSP4XYN31182R13YF",
+    "source_title": "Лаборатория Вайбкодинга",
+    "source_date": "2026-06-11T14:00:00.000Z",
+    "status": "open",
+    "first_seen": "2026-06-11",
+    "last_seen": "2026-06-11"
+  },
+  {
+    "id": "2e997fd1e534",
+    "who": "HR Welcs",
+    "what": "Clarify and manage employee birthday data and payroll intervals; ensure Visual Studio Code download process is communicated and completed for relevant personnel",
+    "due_date": null,
+    "to_me": false,
+    "source_id": "01KTS1W9FSSP4XYN31182R13YF",
+    "source_title": "Лаборатория Вайбкодинга",
+    "source_date": "2026-06-11T14:00:00.000Z",
+    "status": "open",
+    "first_seen": "2026-06-11",
+    "last_seen": "2026-06-11"
+  },
+  {
+    "id": "94a623ec7082",
+    "who": "Mickael Ostrovskiy",
+    "what": "Examine procedural statutes and dashboard problems; oversee contract issues and ensure procedural compliance",
+    "due_date": null,
+    "to_me": true,
+    "source_id": "01KTS1W9FSSP4XYN31182R13YF",
+    "source_title": "Лаборатория Вайбкодинга",
+    "source_date": "2026-06-11T14:00:00.000Z",
+    "status": "open",
+    "first_seen": "2026-06-11",
+    "last_seen": "2026-06-11"
+  },
+  {
+    "id": "92b9f77c9393",
+    "who": "Mickael Ostrovskiy",
+    "what": "Monitor and report on customer success metrics and business results",
+    "due_date": null,
+    "to_me": true,
+    "source_id": "01KTS1W9FSSP4XYN31182R13YF",
+    "source_title": "Лаборатория Вайбкодинга",
+    "source_date": "2026-06-11T14:00:00.000Z",
+    "status": "open",
+    "first_seen": "2026-06-11",
+    "last_seen": "2026-06-11"
+  },
+  {
+    "id": "c08a22bedc49",
+    "who": "All participants",
+    "what": "Coordinate on improving UI elements including chat systems, borders, and UI components (small circles and chambers)",
+    "due_date": null,
+    "to_me": false,
+    "source_id": "01KTS1W9FSSP4XYN31182R13YF",
+    "source_title": "Лаборатория Вайбкодинга",
+    "source_date": "2026-06-11T14:00:00.000Z",
+    "status": "open",
+    "first_seen": "2026-06-11",
+    "last_seen": "2026-06-11"
+  }
+]
