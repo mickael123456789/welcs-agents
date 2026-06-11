@@ -37,7 +37,15 @@ OFFSET_FILE = HERE / ".bot_offset"
 STATE_FILE = HERE / ".bot_state.json"   # {chat_id: "fireflies"|"bitrix"|"priorities"}
 PENDING_FILE = HERE / ".bot_pending.json"  # {chat_id: draft} — черновик, ждущий ✅
 BOARD_CFG_FILE = HERE / ".bot_board_cfg.json"  # {chat_id: {role_key: provider}} — состав совета
+AUTH_FILE = HERE / ".bot_authorized.json"  # [chat_id, ...] — кто прошёл по кодовому слову
 TG = "https://api.telegram.org/bot{token}/{method}"
+
+# Кодовое слово для доступа команды (можно переопределить переменной BOT_ACCESS_CODE).
+ACCESS_CODE = "WELCS2026"
+
+# Кому отвечать в текущей итерации — тому, кто написал. Бот однопоточный (long-polling),
+# поэтому одной модульной переменной достаточно; для рассылок (run.py) не используется.
+_REPLY_CHAT: str | None = None
 
 BTN_FF = "🔥 Fireflies"
 BTN_BX = "📊 Bitrix"
@@ -82,7 +90,7 @@ def _read_env() -> dict:
     for k in ("FIREFLIES_API_KEY", "ANTHROPIC_API_KEY", "MODEL", "NOTIFY_CHANNEL",
               "TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID", "BITRIX_WEBHOOK_URL",
               "NOTION_API_KEY", "ME_EMAILS", "TEAM_DOMAINS", "TEAM_EMAILS",
-              "GEMINI_API_KEY", "OPENAI_API_KEY", "BOT_MAX_RUNTIME"):
+              "GEMINI_API_KEY", "OPENAI_API_KEY", "BOT_MAX_RUNTIME", "BOT_ACCESS_CODE"):
         if os.environ.get(k):
             env[k] = os.environ[k]
     return env
@@ -395,6 +403,18 @@ def _save_pending(p: dict) -> None:
     PENDING_FILE.write_text(json.dumps(p, ensure_ascii=False))
 
 
+def _authorized() -> set:
+    """Множество chat_id, прошедших по кодовому слову."""
+    try:
+        return set(str(x) for x in json.loads(AUTH_FILE.read_text()))
+    except (OSError, ValueError):
+        return set()
+
+
+def _save_authorized(s: set) -> None:
+    AUTH_FILE.write_text(json.dumps(sorted(s), ensure_ascii=False))
+
+
 def _board_cfg() -> dict:
     try:
         return json.loads(BOARD_CFG_FILE.read_text())
@@ -410,7 +430,7 @@ def _edit_inline(env: dict, message_id: int, text: str, inline_markup: dict) -> 
     """Редактирует ранее отправленное сообщение (для меню настройки совета)."""
     from notify_telegram import _md_to_tg_html
     requests.post(TG.format(token=env["TELEGRAM_BOT_TOKEN"], method="editMessageText"),
-                  json={"chat_id": env["TELEGRAM_CHAT_ID"], "message_id": message_id,
+                  json={"chat_id": _REPLY_CHAT or env["TELEGRAM_CHAT_ID"], "message_id": message_id,
                         "text": _md_to_tg_html(text), "parse_mode": "HTML",
                         "disable_web_page_preview": True,
                         "reply_markup": json.dumps(inline_markup)}, timeout=30)
@@ -420,7 +440,7 @@ def _send_inline(env: dict, text: str, inline_markup: dict) -> None:
     """Отправка сообщения с inline-кнопками (для черновика записи)."""
     from notify_telegram import _md_to_tg_html
     token = env["TELEGRAM_BOT_TOKEN"]
-    payload = {"chat_id": env["TELEGRAM_CHAT_ID"], "text": _md_to_tg_html(text),
+    payload = {"chat_id": _REPLY_CHAT or env["TELEGRAM_CHAT_ID"], "text": _md_to_tg_html(text),
                "parse_mode": "HTML", "disable_web_page_preview": True,
                "reply_markup": json.dumps(inline_markup)}
     r = requests.post(TG.format(token=token, method="sendMessage"), json=payload, timeout=30).json()
@@ -437,10 +457,12 @@ def _answer_callback(env: dict, callback_id: str, text: str = "") -> None:
 
 def _handle_callback(env: dict, cq: dict, allowed: str) -> None:
     """Нажатие inline-кнопки под черновиком записи (✅/✏️/❌)."""
+    global _REPLY_CHAT
     chat_id = str((((cq.get("message") or {}).get("chat")) or {}).get("id"))
+    _REPLY_CHAT = chat_id  # отвечаем тому, кто нажал кнопку
     cid = cq.get("id")
     data = cq.get("data") or ""
-    if chat_id != allowed:
+    if chat_id != allowed and chat_id not in _authorized():
         _answer_callback(env, cid)
         return
     pend = _pending()
@@ -532,7 +554,7 @@ def _send(env: dict, text: str, keyboard: bool = True) -> None:
     """Отправка с конвертацией markdown→HTML и постоянной клавиатурой."""
     from notify_telegram import _md_to_tg_html, _split
     token = env["TELEGRAM_BOT_TOKEN"]
-    chat_id = env["TELEGRAM_CHAT_ID"]
+    chat_id = _REPLY_CHAT or env["TELEGRAM_CHAT_ID"]
     chunks = _split(_md_to_tg_html(text))
     for i, chunk in enumerate(chunks):
         payload = {"chat_id": chat_id, "text": chunk, "parse_mode": "HTML",
@@ -561,6 +583,7 @@ def _get_offset() -> int:
 
 
 def main() -> int:
+    global _REPLY_CHAT
     env = _read_env()
     for k in ("FIREFLIES_API_KEY", "ANTHROPIC_API_KEY", "TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID"):
         if not env.get(k):
@@ -612,7 +635,26 @@ def main() -> int:
             msg = upd.get("message") or upd.get("edited_message") or {}
             chat_id = str((msg.get("chat") or {}).get("id"))
             text = (msg.get("text") or "").strip()
-            if chat_id != allowed or not text:
+            if not text:
+                continue
+            _REPLY_CHAT = chat_id  # отвечаем тому, кто написал
+
+            # ── контроль доступа по кодовому слову ───────────────────────────
+            # Владелец (TELEGRAM_CHAT_ID) — всегда внутри. Остальные должны один раз
+            # прислать кодовое слово; после этого их chat_id попадает в разрешённые.
+            if chat_id != allowed and chat_id not in _authorized():
+                code = (env.get("BOT_ACCESS_CODE") or ACCESS_CODE).strip()
+                if text.strip().casefold() == code.casefold():
+                    au = _authorized(); au.add(chat_id); _save_authorized(au)
+                    print(f"🔓 авторизован новый чат {chat_id}")
+                    _send(env, "✅ <b>Доступ открыт!</b> Выбери режим кнопкой ниже и напиши вопрос:\n"
+                               "🔥 <b>Fireflies</b> — про встречи команды и собеседования.\n"
+                               "📊 <b>Bitrix</b> — про CRM, сделки, задачи, чаты.\n"
+                               "🎯 <b>Цели</b> — кидай мысли/идеи/задачи, разберу по целям.\n"
+                               "🧠 <b>Совет</b> — стратегический вопрос → совет директоров.")
+                else:
+                    _send(env, "🔒 Это закрытый бот <b>Welcs</b>. Чтобы получить доступ, "
+                               "пришли кодовое слово одним сообщением.", keyboard=False)
                 continue
 
             # выбор режима кнопкой

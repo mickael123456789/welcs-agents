@@ -11,9 +11,11 @@ reports/
 .bot_offset
 .bot_state.json
 .bot_pending.json
+.bot_authorized.json
 **/.bot_offset
 **/.bot_state.json
 **/.bot_pending.json
+**/.bot_authorized.json
 
 # Python
 __pycache__/
