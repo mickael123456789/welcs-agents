@@ -10,7 +10,7 @@
     "source_date": "2026-06-11T14:00:00.000Z",
     "status": "open",
     "first_seen": "2026-06-11",
-    "last_seen": "2026-06-11"
+    "last_seen": "2026-06-12"
   },
   {
     "id": "672d6b72de31",
@@ -89,5 +89,83 @@
     "status": "open",
     "first_seen": "2026-06-11",
     "last_seen": "2026-06-11"
+  },
+  {
+    "id": "ecf573f29e40",
+    "who": "Tech Welcs",
+    "what": "Review and troubleshoot issues related to folder and dashboard access, focusing on business search folder functionality",
+    "due_date": null,
+    "to_me": false,
+    "source_id": "01KTS1W9FSSP4XYN31182R13YF",
+    "source_title": "Лаборатория Вайбкодинга",
+    "source_date": "2026-06-11T14:00:00.000Z",
+    "status": "open",
+    "first_seen": "2026-06-12",
+    "last_seen": "2026-06-12"
+  },
+  {
+    "id": "e863fa737c91",
+    "who": "Tech Welcs",
+    "what": "Address internet connectivity issues impacting platform use and business tools to ensure stable network infrastructure",
+    "due_date": null,
+    "to_me": false,
+    "source_id": "01KTS1W9FSSP4XYN31182R13YF",
+    "source_title": "Лаборатория Вайбкодинга",
+    "source_date": "2026-06-11T14:00:00.000Z",
+    "status": "open",
+    "first_seen": "2026-06-12",
+    "last_seen": "2026-06-12"
+  },
+  {
+    "id": "73cd7f7f5f97",
+    "who": "HR Welcs",
+    "what": "Clarify and manage employee birthday data and payroll intervals; ensure the Visual Studio Code download process is communicated and completed for relevant personnel",
+    "due_date": null,
+    "to_me": false,
+    "source_id": "01KTS1W9FSSP4XYN31182R13YF",
+    "source_title": "Лаборатория Вайбкодинга",
+    "source_date": "2026-06-11T14:00:00.000Z",
+    "status": "open",
+    "first_seen": "2026-06-12",
+    "last_seen": "2026-06-12"
+  },
+  {
+    "id": "d6e1668f9006",
+    "who": "Mickael Ostrovskiy",
+    "what": "Examine procedural statutes and dashboard problems; oversee contract issues and ensure procedural compliance is established and followed up",
+    "due_date": null,
+    "to_me": true,
+    "source_id": "01KTS1W9FSSP4XYN31182R13YF",
+    "source_title": "Лаборатория Вайбкодинга",
+    "source_date": "2026-06-11T14:00:00.000Z",
+    "status": "open",
+    "first_seen": "2026-06-12",
+    "last_seen": "2026-06-12"
+  },
+  {
+    "id": "9872b7929194",
+    "who": "Mickael Ostrovskiy",
+    "what": "Monitor and report on customer success metrics and business results to evaluate effectiveness of implemented solutions and support structures",
+    "due_date": null,
+    "to_me": true,
+    "source_id": "01KTS1W9FSSP4XYN31182R13YF",
+    "source_title": "Лаборатория Вайбкодинга",
+    "source_date": "2026-06-11T14:00:00.000Z",
+    "status": "open",
+    "first_seen": "2026-06-12",
+    "last_seen": "2026-06-12"
+  },
+  {
+    "id": "73bbf9c20c58",
+    "who": "All participants",
+    "what": "Coordinate on improving user interface elements including chat systems, borders, and UI components to enhance user experience and interface clarity",
+    "due_date": null,
+    "to_me": false,
+    "source_id": "01KTS1W9FSSP4XYN31182R13YF",
+    "source_title": "Лаборатория Вайбкодинга",
+    "source_date": "2026-06-11T14:00:00.000Z",
+    "status": "open",
+    "first_seen": "2026-06-12",
+    "last_seen": "2026-06-12"
   }
 ]
