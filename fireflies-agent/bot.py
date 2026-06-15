@@ -37,11 +37,7 @@ OFFSET_FILE = HERE / ".bot_offset"
 STATE_FILE = HERE / ".bot_state.json"   # {chat_id: "fireflies"|"bitrix"|"priorities"}
 PENDING_FILE = HERE / ".bot_pending.json"  # {chat_id: draft} — черновик, ждущий ✅
 BOARD_CFG_FILE = HERE / ".bot_board_cfg.json"  # {chat_id: {role_key: provider}} — состав совета
-AUTH_FILE = HERE / ".bot_authorized.json"  # [chat_id, ...] — кто прошёл по кодовому слову
 TG = "https://api.telegram.org/bot{token}/{method}"
-
-# Кодовое слово для доступа команды (можно переопределить переменной BOT_ACCESS_CODE).
-ACCESS_CODE = "WELCS2026"
 
 # Кому отвечать в текущей итерации — тому, кто написал. Бот однопоточный (long-polling),
 # поэтому одной модульной переменной достаточно; для рассылок (run.py) не используется.
@@ -90,7 +86,7 @@ def _read_env() -> dict:
     for k in ("FIREFLIES_API_KEY", "ANTHROPIC_API_KEY", "MODEL", "NOTIFY_CHANNEL",
               "TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID", "BITRIX_WEBHOOK_URL",
               "NOTION_API_KEY", "ME_EMAILS", "TEAM_DOMAINS", "TEAM_EMAILS",
-              "GEMINI_API_KEY", "OPENAI_API_KEY", "BOT_MAX_RUNTIME", "BOT_ACCESS_CODE"):
+              "GEMINI_API_KEY", "OPENAI_API_KEY", "BOT_MAX_RUNTIME"):
         if os.environ.get(k):
             env[k] = os.environ[k]
     return env
@@ -403,18 +399,6 @@ def _save_pending(p: dict) -> None:
     PENDING_FILE.write_text(json.dumps(p, ensure_ascii=False))
 
 
-def _authorized() -> set:
-    """Множество chat_id, прошедших по кодовому слову."""
-    try:
-        return set(str(x) for x in json.loads(AUTH_FILE.read_text()))
-    except (OSError, ValueError):
-        return set()
-
-
-def _save_authorized(s: set) -> None:
-    AUTH_FILE.write_text(json.dumps(sorted(s), ensure_ascii=False))
-
-
 def _board_cfg() -> dict:
     try:
         return json.loads(BOARD_CFG_FILE.read_text())
@@ -462,7 +446,7 @@ def _handle_callback(env: dict, cq: dict, allowed: str) -> None:
     _REPLY_CHAT = chat_id  # отвечаем тому, кто нажал кнопку
     cid = cq.get("id")
     data = cq.get("data") or ""
-    if chat_id != allowed and chat_id not in _authorized():
+    if chat_id != allowed:
         _answer_callback(env, cid)
         return
     pend = _pending()
@@ -639,22 +623,12 @@ def main() -> int:
                 continue
             _REPLY_CHAT = chat_id  # отвечаем тому, кто написал
 
-            # ── контроль доступа по кодовому слову ───────────────────────────
-            # Владелец (TELEGRAM_CHAT_ID) — всегда внутри. Остальные должны один раз
-            # прислать кодовое слово; после этого их chat_id попадает в разрешённые.
-            if chat_id != allowed and chat_id not in _authorized():
-                code = (env.get("BOT_ACCESS_CODE") or ACCESS_CODE).strip()
-                if text.strip().casefold() == code.casefold():
-                    au = _authorized(); au.add(chat_id); _save_authorized(au)
-                    print(f"🔓 авторизован новый чат {chat_id}")
-                    _send(env, "✅ <b>Доступ открыт!</b> Выбери режим кнопкой ниже и напиши вопрос:\n"
-                               "🔥 <b>Fireflies</b> — про встречи команды и собеседования.\n"
-                               "📊 <b>Bitrix</b> — про CRM, сделки, задачи, чаты.\n"
-                               "🎯 <b>Цели</b> — кидай мысли/идеи/задачи, разберу по целям.\n"
-                               "🧠 <b>Совет</b> — стратегический вопрос → совет директоров.")
-                else:
-                    _send(env, "🔒 Это закрытый бот <b>Welcs</b>. Чтобы получить доступ, "
-                               "пришли кодовое слово одним сообщением.", keyboard=False)
+            # ── доступ только для владельца ──────────────────────────────────
+            # Бот приватный: отвечаем только владельцу (TELEGRAM_CHAT_ID), всем
+            # остальным — вежливый отказ.
+            if chat_id != allowed:
+                _send(env, "🔒 Это приватный бот <b>Welcs</b>. Доступ есть только у владельца.",
+                      keyboard=False)
                 continue
 
             # выбор режима кнопкой
