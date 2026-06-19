@@ -361,7 +361,7 @@
     "source_date": "2026-06-18T14:00:00.000Z",
     "status": "open",
     "first_seen": "2026-06-18",
-    "last_seen": "2026-06-18"
+    "last_seen": "2026-06-19"
   },
   {
     "id": "7af1bee99915",
@@ -387,7 +387,7 @@
     "source_date": "2026-06-18T14:00:00.000Z",
     "status": "open",
     "first_seen": "2026-06-18",
-    "last_seen": "2026-06-18"
+    "last_seen": "2026-06-19"
   },
   {
     "id": "812e4052ec76",
@@ -400,7 +400,7 @@
     "source_date": "2026-06-18T14:00:00.000Z",
     "status": "open",
     "first_seen": "2026-06-18",
-    "last_seen": "2026-06-18"
+    "last_seen": "2026-06-19"
   },
   {
     "id": "b00f616873d9",
@@ -413,7 +413,7 @@
     "source_date": "2026-06-18T14:00:00.000Z",
     "status": "open",
     "first_seen": "2026-06-18",
-    "last_seen": "2026-06-18"
+    "last_seen": "2026-06-19"
   },
   {
     "id": "7a4d57d5c01d",
@@ -426,7 +426,7 @@
     "source_date": "2026-06-18T14:00:00.000Z",
     "status": "open",
     "first_seen": "2026-06-18",
-    "last_seen": "2026-06-18"
+    "last_seen": "2026-06-19"
   },
   {
     "id": "4a482dbdc97a",
@@ -439,7 +439,7 @@
     "source_date": "2026-06-18T14:00:00.000Z",
     "status": "open",
     "first_seen": "2026-06-18",
-    "last_seen": "2026-06-18"
+    "last_seen": "2026-06-19"
   },
   {
     "id": "c6b1a0f94a7d",
@@ -452,7 +452,7 @@
     "source_date": "2026-06-18T14:00:00.000Z",
     "status": "open",
     "first_seen": "2026-06-18",
-    "last_seen": "2026-06-18"
+    "last_seen": "2026-06-19"
   },
   {
     "id": "ccf1c7ff0e2c",
@@ -465,6 +465,19 @@
     "source_date": "2026-06-18T14:00:00.000Z",
     "status": "open",
     "first_seen": "2026-06-18",
-    "last_seen": "2026-06-18"
+    "last_seen": "2026-06-19"
+  },
+  {
+    "id": "447dd2612839",
+    "who": "Accounting Team",
+    "what": "Address inconsistencies in repository access, specifically where push access does not grant repository options for the Accounting Dashboard",
+    "due_date": null,
+    "to_me": false,
+    "source_id": "01KTSZTR3XT751CQT55N29FEJH",
+    "source_title": "Лаборатория Вайбкодинга",
+    "source_date": "2026-06-18T14:00:00.000Z",
+    "status": "open",
+    "first_seen": "2026-06-19",
+    "last_seen": "2026-06-19"
   }
 ]
