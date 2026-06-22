@@ -86,6 +86,35 @@ class Notion:
             cursor = data.get("next_cursor")
         return "\n".join(out)
 
+    def search(self, query: str = "", only: str | None = None,
+               page_size: int = 50) -> list[dict]:
+        """Поиск по всему, что расшарено интеграции (••• → Connections).
+
+        Пустой query → вернёт ВСЕ доступные интеграции страницы и базы — этим
+        удобно проверять, «подключена ли ещё одна страница». only='page' или
+        'database' фильтрует тип объекта.
+        """
+        payload: dict[str, Any] = {"page_size": min(page_size, 100),
+                                   "sort": {"direction": "descending",
+                                            "timestamp": "last_edited_time"}}
+        if query:
+            payload["query"] = query
+        if only in ("page", "database"):
+            payload["filter"] = {"property": "object", "value": only}
+        data = self._request("POST", "/search", payload)
+        return [_simplify_search(r) for r in data.get("results", [])]
+
+    def query_database(self, database_id: str, filter_: dict | None = None,
+                       sorts: list | None = None, page_size: int = 50) -> list[dict]:
+        """Запрос к произвольной базе (по id), если она расшарена интеграции."""
+        payload: dict[str, Any] = {"page_size": min(page_size, 100)}
+        if filter_:
+            payload["filter"] = filter_
+        if sorts:
+            payload["sorts"] = sorts
+        data = self._request("POST", f"/databases/{database_id}/query", payload)
+        return [_simplify_page(p) for p in data.get("results", [])]
+
     # ── запись ──────────────────────────────────────────────────────────────────
 
     def create_inbox_entry(self, *, title: str, tip: str | None = None,
@@ -222,6 +251,29 @@ def _block_text(block: dict) -> str:
             prefix = "# "
         return prefix + _plain(rich)
     return ""
+
+
+def _simplify_search(obj: dict) -> dict:
+    """Унифицированное представление результата /search (страница или база)."""
+    kind = obj.get("object")  # "page" | "database"
+    out: dict[str, Any] = {
+        "object": kind,
+        "id": obj.get("id"),
+        "url": obj.get("url"),
+        "last_edited": obj.get("last_edited_time"),
+    }
+    if kind == "database":
+        out["title"] = _plain(obj.get("title")) or "(без названия)"
+    else:  # page — ищем title-свойство
+        title = ""
+        for p in (obj.get("properties") or {}).values():
+            if p.get("type") == "title":
+                title = _plain(p.get("title"))
+                break
+        out["title"] = title or "(без названия)"
+        parent = obj.get("parent") or {}
+        out["parent_type"] = parent.get("type")
+    return out
 
 
 def _simplify_page(page: dict) -> dict:

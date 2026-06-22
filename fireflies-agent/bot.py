@@ -48,9 +48,10 @@ BTN_BX = "📊 Bitrix"
 BTN_GO = "🎯 Цели"
 BTN_BD = "🧠 Совет"
 BTN_MO = "🌅 Утро"
+BTN_NO = "📝 Notion"
 KEYBOARD = {
     "keyboard": [[{"text": BTN_FF}, {"text": BTN_BX}], [{"text": BTN_GO}, {"text": BTN_BD}],
-                 [{"text": BTN_MO}]],
+                 [{"text": BTN_MO}, {"text": BTN_NO}]],
     "resize_keyboard": True,
     "is_persistent": True,
     "input_field_placeholder": "Выбери режим кнопкой, потом напиши",
@@ -375,6 +376,87 @@ def answer_bitrix(question: str, env: dict) -> str:
     return "Слишком долго искал — переформулируй вопрос, пожалуйста."
 
 
+# ════════════════════════════ NOTION Q&A ═════════════════════════════════════
+
+NX_SYSTEM = """\
+Ты — ассистент руководителя компании Welcs. Отвечаешь на вопросы про рабочее \
+пространство Notion: какие страницы и базы подключены к боту, что в них, статусы \
+задач и целей.
+
+ВАЖНО про «подключение». Бот видит в Notion ТОЛЬКО то, что явно расшарено его \
+интеграции (в Notion: страница/база → ••• → Connections → выбрать интеграцию). \
+Инструмент notion_query с action="search" и пустым query возвращает полный список \
+доступных интеграции страниц и баз — именно по нему проверяй, «подключена ли ещё \
+одна страница». Если нужной страницы нет в выдаче search — значит, её ещё НЕ \
+расшарили интеграции, и об этом надо прямо сказать (и подсказать открыть доступ \
+через ••• → Connections).
+
+Инструмент notion_query:
+- action="search", query="…" — найти страницы/базы (пустой query = показать все доступные).
+- action="read_page", page_id="…" — прочитать текст страницы.
+- action="query_database", database_id="…" — строки базы.
+
+Отвечай по-русски, кратко и по делу, указывай названия. Не выдумывай: если объекта \
+нет в выдаче — так и говори."""
+
+NX_TOOLS = [
+    {"name": "notion_query",
+     "description": "Чтение Notion (только то, что расшарено интеграции): "
+                    "search — список доступных страниц/баз; read_page — текст страницы; "
+                    "query_database — строки базы.",
+     "input_schema": {"type": "object", "properties": {
+         "action": {"type": "string", "enum": ["search", "read_page", "query_database"]},
+         "query": {"type": "string", "description": "Текст для action=search (пусто = всё доступное)."},
+         "only": {"type": "string", "enum": ["page", "database"],
+                  "description": "Фильтр типа объекта для search (необязательно)."},
+         "page_id": {"type": "string", "description": "Для action=read_page."},
+         "database_id": {"type": "string", "description": "Для action=query_database."}},
+         "required": ["action"]}},
+]
+
+
+def _nx_call(nx, inp: dict) -> str:
+    action = (inp.get("action") or "").strip()
+    try:
+        if action == "search":
+            res: Any = nx.search(inp.get("query", "") or "", only=inp.get("only"))
+        elif action == "read_page":
+            res = {"text": nx.get_page_text(inp.get("page_id", ""))}
+        elif action == "query_database":
+            res = nx.query_database(inp.get("database_id", ""))
+        else:
+            res = {"error": f"неизвестное действие {action!r}"}
+    except Exception as e:  # noqa: BLE001
+        res = {"error": str(e)}
+    text = json.dumps(res, ensure_ascii=False)
+    return text[:40_000] + ("…(обрезано)" if len(text) > 40_000 else "")
+
+
+def answer_notion(question: str, env: dict) -> str:
+    if not env.get("NOTION_API_KEY"):
+        return "⚠️ Notion не настроен: нет NOTION_API_KEY в .env."
+    from notion_client import Notion
+    nx = Notion(env["NOTION_API_KEY"])
+    client = anthropic.Anthropic(api_key=env["ANTHROPIC_API_KEY"])
+    model = env.get("MODEL", "claude-opus-4-8")
+    messages = [{"role": "user", "content": question}]
+    for _ in range(8):
+        resp = client.messages.create(
+            model=model, max_tokens=3000,
+            system=[{"type": "text", "text": NX_SYSTEM, "cache_control": {"type": "ephemeral"}}],
+            tools=NX_TOOLS, messages=messages)
+        if resp.stop_reason != "tool_use":
+            return "".join(b.text for b in resp.content if b.type == "text").strip() or "Не нашёл, что ответить."
+        messages.append({"role": "assistant", "content": resp.content})
+        results = []
+        for b in resp.content:
+            if b.type != "tool_use":
+                continue
+            results.append({"type": "tool_result", "tool_use_id": b.id, "content": _nx_call(nx, b.input)})
+        messages.append({"role": "user", "content": results})
+    return "Слишком долго искал — переформулируй вопрос, пожалуйста."
+
+
 # ════════════════════════════ Telegram loop ══════════════════════════════════
 
 def _state() -> dict:
@@ -659,13 +741,20 @@ def main() -> int:
                            "сам или делегировать) и сверю с целями на 3/6/12 мес.\n\n"
                            "Можешь и задать цели: напиши, например, «цель на 3 месяца: …».")
                 continue
+            if text == BTN_NO or text.lower() in ("notion", "/notion", "ноушн"):
+                state[chat_id] = "notion"; _save_state(state)
+                _send(env, "📝 Режим: <b>Notion</b>. Спроси про рабочее пространство: «какие страницы/базы "
+                           "подключены?», «подключилась ли страница X?», «что в базе …?». Бот видит только то, "
+                           "что расшарено его интеграции (••• → Connections).")
+                continue
             if text.startswith("/start"):
                 _send(env, "Привет! Выбери режим кнопкой ниже, потом напиши:\n"
                             "🔥 <b>Fireflies</b> — про встречи команды и собеседования.\n"
                             "📊 <b>Bitrix</b> — про CRM, сделки, задачи, чаты.\n"
                             "🎯 <b>Цели</b> — кидай мысли/идеи/задачи, разберу по целям и запишу в Notion.\n"
                             "🧠 <b>Совет</b> — стратегический вопрос → совет директоров из разных ИИ.\n"
-                            "🌅 <b>Утро</b> — утренний прогон задач дня по твоим вопросам + связь с целями.")
+                            "🌅 <b>Утро</b> — утренний прогон задач дня по твоим вопросам + связь с целями.\n"
+                            "📝 <b>Notion</b> — что подключено в Notion, что в страницах/базах.")
                 continue
 
             src = state.get(chat_id)
@@ -732,6 +821,17 @@ def main() -> int:
                     reply = f"⚠️ Ошибка прогона: {e}"
                 _send(env, reply)
                 print("→ прогон отправлен")
+                continue
+
+            # режим Notion: поиск/чтение рабочего пространства
+            if src == "notion":
+                _send(env, "📝 Смотрю в Notion… ~15–30 сек.", keyboard=False)
+                try:
+                    reply = answer_notion(text, env)
+                except Exception as e:  # noqa: BLE001
+                    reply = f"⚠️ Ошибка при обработке: {e}"
+                _send(env, "📝 " + reply)
+                print("→ ответ Notion отправлен")
                 continue
 
             # режимы вопрос-ответ (Fireflies / Bitrix)
