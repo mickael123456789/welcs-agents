@@ -1,4 +1,6 @@
 {
-  "_comment": "Доступ команды к боту. Владелец (TELEGRAM_CHAT_ID) всегда имеет все режимы и сюда не вносится. Для каждого сотрудника: ключ — его Telegram chat_id (число строкой), modes — список разрешённых режимов из: fireflies, bitrix, priorities, board, morning, notion. Узнать ID: пусть человек отправит боту /myid.",
-  "users": {}
+  "_comment": "Доступ команды к боту. Владелец (TELEGRAM_CHAT_ID) всегда имеет все режимы и сюда не вносится. Ключ — Telegram chat_id (число строкой) ИЛИ @username. modes — список из: fireflies, bitrix, priorities, board, morning, notion. Узнать ID/username: пусть человек отправит боту /myid.",
+  "users": {
+    "@DNatalyaaa": { "name": "Наталья", "modes": ["bitrix"] }
+  }
 }

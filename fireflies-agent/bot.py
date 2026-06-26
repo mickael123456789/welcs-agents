@@ -102,12 +102,28 @@ def _team_access() -> dict:
         return {}
 
 
-def _allowed_modes(chat_id: str, owner: str) -> set:
-    """Какие режимы доступны чату. Владелец — все; команда — из конфига; иначе — пусто."""
+def _norm_user(u: str | None) -> str:
+    return (u or "").lstrip("@").lower()
+
+
+def _team_entry(chat_id: str, username: str, users: dict) -> dict | None:
+    """Найти запись доступа по chat_id ИЛИ по @username (ключ или поле username)."""
+    if chat_id in users:
+        return users[chat_id]
+    un = _norm_user(username)
+    if un:
+        for key, val in users.items():
+            if _norm_user(key) == un or _norm_user((val or {}).get("username")) == un:
+                return val
+    return None
+
+
+def _allowed_modes(chat_id: str, username: str, owner: str) -> set:
+    """Какие режимы доступны. Владелец — все; команда — по chat_id/username; иначе — пусто."""
     if chat_id == owner:
         return set(ALL_MODES)
-    u = _team_access().get(chat_id)
-    return {m for m in (u.get("modes") or []) if m in ALL_MODES} if u else set()
+    ent = _team_entry(chat_id, username, _team_access())
+    return {m for m in (ent.get("modes") or []) if m in ALL_MODES} if ent else set()
 
 
 def _mode_from_text(text: str) -> str | None:
@@ -762,22 +778,24 @@ def main() -> int:
 
             msg = upd.get("message") or upd.get("edited_message") or {}
             chat_id = str((msg.get("chat") or {}).get("id"))
+            username = (msg.get("from") or {}).get("username") or ""
             text = (msg.get("text") or "").strip()
             if not text:
                 continue
             _REPLY_CHAT = chat_id  # отвечаем тому, кто написал
             _REPLY_KEYBOARD = None
 
-            # /myid — узнать свой Telegram ID (доступно всем, чтобы выдать доступ)
+            # /myid — узнать свой Telegram ID и @username (для выдачи доступа)
             if text.lower().startswith("/myid"):
-                _send(env, f"Твой Telegram ID: <code>{chat_id}</code>", keyboard=False)
+                uname = f"\n@username: <code>@{username}</code>" if username else ""
+                _send(env, f"Твой Telegram ID: <code>{chat_id}</code>{uname}", keyboard=False)
                 continue
 
             # ── доступ по человеку и набору режимов ──────────────────────────
             # Владелец (TELEGRAM_CHAT_ID) — все режимы. Команда — режимы из
-            # team_access.json. Остальные — вежливый отказ.
+            # team_access.json (по chat_id или @username). Остальные — вежливый отказ.
             owner = (chat_id == allowed)
-            modes = _allowed_modes(chat_id, allowed)
+            modes = _allowed_modes(chat_id, username, allowed)
             if not owner and not modes:
                 _send(env, "🔒 Это приватный бот <b>Welcs</b>. Доступа нет. "
                            "Если он тебе нужен — попроси владельца, и пришли ему свой ID "
