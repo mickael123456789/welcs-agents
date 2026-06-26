@@ -37,11 +37,14 @@ OFFSET_FILE = HERE / ".bot_offset"
 STATE_FILE = HERE / ".bot_state.json"   # {chat_id: "fireflies"|"bitrix"|"priorities"}
 PENDING_FILE = HERE / ".bot_pending.json"  # {chat_id: draft} — черновик, ждущий ✅
 BOARD_CFG_FILE = HERE / ".bot_board_cfg.json"  # {chat_id: {role_key: provider}} — состав совета
+TEAM_FILE = HERE / "team_access.json"   # {"users": {chat_id: {name, modes:[...]}}} — доступ команды
 TG = "https://api.telegram.org/bot{token}/{method}"
 
 # Кому отвечать в текущей итерации — тому, кто написал. Бот однопоточный (long-polling),
 # поэтому одной модульной переменной достаточно; для рассылок (run.py) не используется.
 _REPLY_CHAT: str | None = None
+# Клавиатура для текущего ответа (у ограниченных пользователей — только их кнопки).
+_REPLY_KEYBOARD: dict | None = None
 
 BTN_FF = "🔥 Fireflies"
 BTN_BX = "📊 Bitrix"
@@ -69,6 +72,65 @@ BOARD_KEYBOARD = {"inline_keyboard": [[
     {"text": "💾 Записать решение в Notion", "callback_data": "bd_save"},
     {"text": "✖️ Не надо", "callback_data": "bd_dismiss"},
 ]]}
+
+# ── режимы и доступ ───────────────────────────────────────────────────────────
+# Все режимы бота и соответствие «режим → кнопка».
+MODE_BTN = {"fireflies": BTN_FF, "bitrix": BTN_BX, "priorities": BTN_GO,
+            "board": BTN_BD, "morning": BTN_MO, "notion": BTN_NO}
+ALL_MODES = set(MODE_BTN)
+# Текст/команда → режим (для распознавания выбора режима).
+MODE_ALIASES = {
+    "fireflies": ("fireflies", "/fireflies"),
+    "bitrix": ("bitrix", "/bitrix"),
+    "priorities": ("цели", "/goals", "/priorities"),
+    "board": ("совет", "/board", "/sovet"),
+    "morning": ("утро", "/morning", "/utro"),
+    "notion": ("notion", "/notion", "ноушн"),
+}
+
+
+def _team_access() -> dict:
+    """Доступ команды из team_access.json: {chat_id: {name, modes:[...]}}.
+
+    Файл лежит в репозитории (не в .gitignore), поэтому переживает перезапуски
+    облачного процесса — в отличие от .bot_* состояния.
+    """
+    try:
+        data = json.loads(TEAM_FILE.read_text(encoding="utf-8"))
+        return {str(k): v for k, v in (data.get("users") or {}).items()}
+    except (OSError, ValueError):
+        return {}
+
+
+def _allowed_modes(chat_id: str, owner: str) -> set:
+    """Какие режимы доступны чату. Владелец — все; команда — из конфига; иначе — пусто."""
+    if chat_id == owner:
+        return set(ALL_MODES)
+    u = _team_access().get(chat_id)
+    return {m for m in (u.get("modes") or []) if m in ALL_MODES} if u else set()
+
+
+def _mode_from_text(text: str) -> str | None:
+    """Распознать выбор режима по тексту кнопки или команде."""
+    low = text.lower()
+    for mode, btn in MODE_BTN.items():
+        if text == btn:
+            return mode
+    for mode, aliases in MODE_ALIASES.items():
+        if low in aliases:
+            return mode
+    return None
+
+
+def _keyboard_for(modes: set) -> dict:
+    """Клавиатура только из разрешённых пользователю кнопок (по 2 в ряд)."""
+    if modes >= ALL_MODES:
+        return KEYBOARD
+    btns = [{"text": MODE_BTN[m]} for m in MODE_BTN if m in modes]  # стабильный порядок
+    rows = [btns[i:i + 2] for i in range(0, len(btns), 2)]
+    return {"keyboard": rows, "resize_keyboard": True, "is_persistent": True,
+            "input_field_placeholder": "Выбери режим кнопкой, потом напиши"}
+
 
 # ── окружение: сливаем .env обоих агентов ─────────────────────────────────────
 
@@ -528,7 +590,7 @@ def _handle_callback(env: dict, cq: dict, allowed: str) -> None:
     _REPLY_CHAT = chat_id  # отвечаем тому, кто нажал кнопку
     cid = cq.get("id")
     data = cq.get("data") or ""
-    if chat_id != allowed:
+    if chat_id != allowed and chat_id not in _team_access():
         _answer_callback(env, cid)
         return
     pend = _pending()
@@ -626,7 +688,7 @@ def _send(env: dict, text: str, keyboard: bool = True) -> None:
         payload = {"chat_id": chat_id, "text": chunk, "parse_mode": "HTML",
                    "disable_web_page_preview": True}
         if keyboard and i == len(chunks) - 1:
-            payload["reply_markup"] = json.dumps(KEYBOARD)
+            payload["reply_markup"] = json.dumps(_REPLY_KEYBOARD or KEYBOARD)
         try:
             r = requests.post(TG.format(token=token, method="sendMessage"),
                               json=payload, timeout=30).json()
@@ -649,7 +711,7 @@ def _get_offset() -> int:
 
 
 def main() -> int:
-    global _REPLY_CHAT
+    global _REPLY_CHAT, _REPLY_KEYBOARD
     env = _read_env()
     for k in ("FIREFLIES_API_KEY", "ANTHROPIC_API_KEY", "TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID"):
         if not env.get(k):
@@ -704,13 +766,29 @@ def main() -> int:
             if not text:
                 continue
             _REPLY_CHAT = chat_id  # отвечаем тому, кто написал
+            _REPLY_KEYBOARD = None
 
-            # ── доступ только для владельца ──────────────────────────────────
-            # Бот приватный: отвечаем только владельцу (TELEGRAM_CHAT_ID), всем
-            # остальным — вежливый отказ.
-            if chat_id != allowed:
-                _send(env, "🔒 Это приватный бот <b>Welcs</b>. Доступ есть только у владельца.",
-                      keyboard=False)
+            # /myid — узнать свой Telegram ID (доступно всем, чтобы выдать доступ)
+            if text.lower().startswith("/myid"):
+                _send(env, f"Твой Telegram ID: <code>{chat_id}</code>", keyboard=False)
+                continue
+
+            # ── доступ по человеку и набору режимов ──────────────────────────
+            # Владелец (TELEGRAM_CHAT_ID) — все режимы. Команда — режимы из
+            # team_access.json. Остальные — вежливый отказ.
+            owner = (chat_id == allowed)
+            modes = _allowed_modes(chat_id, allowed)
+            if not owner and not modes:
+                _send(env, "🔒 Это приватный бот <b>Welcs</b>. Доступа нет. "
+                           "Если он тебе нужен — попроси владельца, и пришли ему свой ID "
+                           "(узнать: отправь <code>/myid</code>).", keyboard=False)
+                continue
+            _REPLY_KEYBOARD = _keyboard_for(modes)  # показываем только разрешённые кнопки
+
+            # ограниченному пользователю запрещаем выбирать чужой режим
+            req = _mode_from_text(text)
+            if req and req not in modes:
+                _send(env, "🔒 У тебя нет доступа к этому режиму.")
                 continue
 
             # выбор режима кнопкой
@@ -748,18 +826,26 @@ def main() -> int:
                            "что расшарено его интеграции (••• → Connections).")
                 continue
             if text.startswith("/start"):
-                _send(env, "Привет! Выбери режим кнопкой ниже, потом напиши:\n"
-                            "🔥 <b>Fireflies</b> — про встречи команды и собеседования.\n"
-                            "📊 <b>Bitrix</b> — про CRM, сделки, задачи, чаты.\n"
-                            "🎯 <b>Цели</b> — кидай мысли/идеи/задачи, разберу по целям и запишу в Notion.\n"
-                            "🧠 <b>Совет</b> — стратегический вопрос → совет директоров из разных ИИ.\n"
-                            "🌅 <b>Утро</b> — утренний прогон задач дня по твоим вопросам + связь с целями.\n"
-                            "📝 <b>Notion</b> — что подключено в Notion, что в страницах/базах.")
+                lines = {
+                    "fireflies": "🔥 <b>Fireflies</b> — про встречи команды и собеседования.",
+                    "bitrix": "📊 <b>Bitrix</b> — про CRM, сделки, задачи, чаты.",
+                    "priorities": "🎯 <b>Цели</b> — кидай мысли/идеи/задачи, разберу по целям и запишу в Notion.",
+                    "board": "🧠 <b>Совет</b> — стратегический вопрос → совет директоров из разных ИИ.",
+                    "morning": "🌅 <b>Утро</b> — утренний прогон задач дня по твоим вопросам + связь с целями.",
+                    "notion": "📝 <b>Notion</b> — что подключено в Notion, что в страницах/базах.",
+                }
+                avail = "\n".join(lines[m] for m in MODE_BTN if m in modes)
+                _send(env, "Привет! Выбери режим кнопкой ниже, потом напиши:\n" + avail)
                 continue
 
             src = state.get(chat_id)
+            if not owner and src not in modes:  # снимаем чужой/устаревший режим
+                src = None
+            if not src and len(modes) == 1:     # один доступный режим → включаем сразу
+                src = next(iter(modes)); state[chat_id] = src; _save_state(state)
             if not src:
-                _send(env, "Сначала выбери режим кнопкой ниже 👇 (🔥 Fireflies / 📊 Bitrix / 🎯 Цели / 🧠 Совет).")
+                avail = " / ".join(MODE_BTN[m] for m in MODE_BTN if m in modes)
+                _send(env, f"Сначала выбери режим кнопкой ниже 👇 ({avail}).")
                 continue
 
             print(f"← [{src}] {text[:80]}")
