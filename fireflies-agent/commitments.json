@@ -804,5 +804,83 @@
     "status": "open",
     "first_seen": "2026-06-30",
     "last_seen": "2026-06-30"
+  },
+  {
+    "id": "b4c8d0f2dadd",
+    "who": "Iara Fernandez",
+    "what": "Contactar a los clientes de la propiedad 29 para cobrar el resto del pago pendiente según condiciones de Avantio y confirmar la reserva",
+    "due_date": "2026-07-02",
+    "to_me": false,
+    "source_id": "01KVVEV5E5T15F27CVHT00ATKF",
+    "source_title": "Pricing Meeting Welcs",
+    "source_date": "2026-07-02T09:00:00.000Z",
+    "status": "open",
+    "first_seen": "2026-07-02",
+    "last_seen": "2026-07-02"
+  },
+  {
+    "id": "8c1ea150a4ef",
+    "who": "Iara Fernandez",
+    "what": "Preparar lista concreta de propiedades A, B y C para planificar enfoque diferenciado de precios y promociones, con control especial de subida de precios a finales de agosto para categoría A",
+    "due_date": null,
+    "to_me": false,
+    "source_id": "01KVVEV5E5T15F27CVHT00ATKF",
+    "source_title": "Pricing Meeting Welcs",
+    "source_date": "2026-07-02T09:00:00.000Z",
+    "status": "open",
+    "first_seen": "2026-07-02",
+    "last_seen": "2026-07-02"
+  },
+  {
+    "id": "44c865c78d83",
+    "who": "Coen van Sambeeck",
+    "what": "Continuar bajando precios progresivamente en propiedades vacías hasta conseguir reservas, especialmente hasta el 13 de julio, y ajustar promociones para ampliar ventana de última hora a 14 días",
+    "due_date": "2026-07-13",
+    "to_me": false,
+    "source_id": "01KVVEV5E5T15F27CVHT00ATKF",
+    "source_title": "Pricing Meeting Welcs",
+    "source_date": "2026-07-02T09:00:00.000Z",
+    "status": "open",
+    "first_seen": "2026-07-02",
+    "last_seen": "2026-07-02"
+  },
+  {
+    "id": "d4aaee211618",
+    "who": "Owner Welcs",
+    "what": "Supervisar y aprobar divisiones del mes en períodos para la estrategia de precios y confirmar incrementos de precios de fin de semana en viernes y sábado",
+    "due_date": null,
+    "to_me": false,
+    "source_id": "01KVVEV5E5T15F27CVHT00ATKF",
+    "source_title": "Pricing Meeting Welcs",
+    "source_date": "2026-07-02T09:00:00.000Z",
+    "status": "open",
+    "first_seen": "2026-07-02",
+    "last_seen": "2026-07-02"
+  },
+  {
+    "id": "78b3904828f9",
+    "who": "Equipo en general",
+    "what": "Revisar visibilidad de las propiedades con ocupación cero para descartar problemas técnicos o errores en los canales de reserva, especialmente en Booking y Airbnb",
+    "due_date": null,
+    "to_me": false,
+    "source_id": "01KVVEV5E5T15F27CVHT00ATKF",
+    "source_title": "Pricing Meeting Welcs",
+    "source_date": "2026-07-02T09:00:00.000Z",
+    "status": "open",
+    "first_seen": "2026-07-02",
+    "last_seen": "2026-07-02"
+  },
+  {
+    "id": "ca8d0fb935fe",
+    "who": "Coen van Sambeeck e Iara Fernandez",
+    "what": "Mantener actualización continua y revisión conjunta de precios y ocupación basada en datos reales y competencia, adaptando precios diarios según demanda",
+    "due_date": null,
+    "to_me": false,
+    "source_id": "01KVVEV5E5T15F27CVHT00ATKF",
+    "source_title": "Pricing Meeting Welcs",
+    "source_date": "2026-07-02T09:00:00.000Z",
+    "status": "open",
+    "first_seen": "2026-07-02",
+    "last_seen": "2026-07-02"
   }
 ]
